@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: problem-solver
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: problem-solver-db
+          property: connectionString
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: FOUNDER_NAME
+        value: "ali_md_uzzol"
+
+databases:
+  - name: problem-solver-db
+    plan: free
