@@ -1,7 +1,6 @@
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
 stripe==7.5.0
-openai==0.28.0
 aiohttp==3.9.0
 beautifulsoup4==4.12.2
 cloudscraper==1.2.71
@@ -12,3 +11,5 @@ fake-useragent==1.4.0
 bcrypt==4.1.2
 slowapi==0.1.9
 python-multipart==0.0.6
+httpx==0.27.0
+pandas==2.1.3
