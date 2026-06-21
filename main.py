@@ -1,56 +1,77 @@
 #!/usr/bin/env python3
 """
-PROBLEM SOLVING & CONTACT FINDER - ULTIMATE POWER VERSION
-===========================================================
-All-in-one business intelligence platform with:
+PROBLEM SOLVING & CONTACT FINDER - ULTIMATE EDITION
+===================================================
+Professional website with:
 - AI Chat (DeepSeek)
-- Company/Contact/Location Finder
-- Social Media Discovery (LinkedIn, Twitter, TikTok, Instagram, YouTube)
-- Email & Phone Finder
-- Funding & Technology Detection
-- News & Reviews
-- Excel Export
-- Stripe Payments
-- 5 Pricing Tiers
-- Founder Mode
+- Multi-layer scraping with fallbacks
+- Company/Contact/Location/Social Media Finder
+- 5 Payment Tiers (Stripe)
+- Founder Mode (hidden secret word)
+- Professional design with navigation
 """
 
-from fastapi import FastAPI, Request, Response
-from fastapi.responses import HTMLResponse, FileResponse
-from fastapi.middleware.cors import CORSMiddleware
-import uvicorn
+import asyncio
+import aiohttp
+import httpx
+import requests
+import cloudscraper
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+import undetected_chromedriver as uc
+from bs4 import BeautifulSoup
+import re
+import json
+import os
 import sqlite3
 import secrets
-import os
-import httpx
-import json
-import re
-import aiohttp
 from datetime import datetime, timedelta
-from bs4 import BeautifulSoup
-import cloudscraper
+from typing import List, Dict, Any, Optional, Tuple
+from dataclasses import dataclass, asdict, field
+import uvicorn
+from fastapi import FastAPI, Request, HTTPException, Depends, Header
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+from contextlib import asynccontextmanager
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
+from email_validator import validate_email
+import dns.resolver
+import whois
+import phonenumbers
+from phonenumbers import carrier, geocoder
+from fake_useragent import UserAgent
+import bcrypt
+import pyotp
+import qrcode
 from io import BytesIO
+import base64
 
 # ============================================
 # CONFIGURATION
 # ============================================
 
-DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "sk_your_deepseek_key_here")
-FOUNDER_NAME = os.environ.get("FOUNDER_NAME", "admin")
-STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "sk_test_your_key")
-STRIPE_PUBLIC_KEY = os.environ.get("STRIPE_PUBLIC_KEY", "pk_test_your_key")
+# Environment Variables (set in Render)
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
+STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
+STRIPE_PUBLIC_KEY = os.environ.get("STRIPE_PUBLIC_KEY", "")
+FOUNDER_NAME = os.environ.get("FOUNDER_NAME", "")
+DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./problemsolver.db")
+SECRET_KEY = os.environ.get("SECRET_KEY", secrets.token_urlsafe(32))
 
-app = FastAPI(title="Problem Solving & Contact Finder - Ultimate", version="3.0.0")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Pricing Tiers
+PRICING = {
+    "free": {"price": 0, "tasks_limit": 2, "lookups_limit": 2, "ai_chat": True},
+    "basic": {"price": 29, "tasks_limit": 500, "lookups_limit": 500, "ai_chat": True},
+    "medium": {"price": 99, "tasks_limit": 2000, "lookups_limit": 2000, "ai_chat": True},
+    "high": {"price": 299, "tasks_limit": 999999, "lookups_limit": 999999, "ai_chat": True},
+    "hourly": {"price": 10, "tasks_limit": 999999, "lookups_limit": 999999, "ai_chat": True}
+}
 
 # ============================================
 # DATABASE
@@ -60,61 +81,263 @@ def init_db():
     conn = sqlite3.connect('problemsolver.db')
     cursor = conn.cursor()
     
+    # Users table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             id TEXT PRIMARY KEY,
             email TEXT UNIQUE,
             name TEXT,
+            password_hash TEXT,
             tier TEXT DEFAULT 'free',
             founder_mode BOOLEAN DEFAULT FALSE,
             tasks_used INTEGER DEFAULT 0,
+            lookups_used INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    # Sessions table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS sessions (
+            id TEXT PRIMARY KEY,
+            user_id TEXT,
+            token TEXT UNIQUE,
+            expires_at TEXT,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     ''')
     
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS hourly_sessions (
-            id TEXT PRIMARY KEY,
-            user_id TEXT,
-            session_key TEXT UNIQUE,
-            expires_at TEXT
-        )
-    ''')
-    
+    # Search history
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS search_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id TEXT,
             query TEXT,
-            result TEXT,
+            result_type TEXT,
+            result_data TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    # Hourly sessions
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS hourly_sessions (
+            id TEXT PRIMARY KEY,
+            user_id TEXT,
+            session_key TEXT UNIQUE,
+            expires_at TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    # Chat history
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS chat_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            session_id TEXT,
+            question TEXT,
+            answer TEXT,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     ''')
     
     conn.commit()
     conn.close()
-    print("Database initialized")
+    print("✅ Database initialized")
 
 init_db()
 
 # ============================================
-# SCRAPER ENGINE
+# ULTIMATE SCRAPER ENGINE
 # ============================================
 
 class UltimateScraper:
-    def __init__(self):
-        self.scraper = cloudscraper.create_scraper()
-        self.session = None
+    """Multi-layer scraper with fallback methods"""
     
-    async def fetch_url(self, url):
+    def __init__(self):
+        self.ua = UserAgent()
+        self.scraper = cloudscraper.create_scraper()
+        self.driver = None
+        self.session = None
+        
+    # ============================================
+    # LAYER 1: aiohttp (async, fastest)
+    # ============================================
+    
+    async def fetch_aiohttp(self, url: str) -> Optional[str]:
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=10) as response:
-                    return await response.text()
+                headers = {'User-Agent': self.ua.random}
+                async with session.get(url, headers=headers, timeout=15) as response:
+                    if response.status == 200:
+                        return await response.text()
         except:
-            return None
+            pass
+        return None
     
-    async def find_company(self, company_name):
+    # ============================================
+    # LAYER 2: requests (sync, reliable)
+    # ============================================
+    
+    def fetch_requests(self, url: str) -> Optional[str]:
+        try:
+            headers = {'User-Agent': self.ua.random}
+            response = requests.get(url, headers=headers, timeout=15)
+            if response.status_code == 200:
+                return response.text
+        except:
+            pass
+        return None
+    
+    # ============================================
+    # LAYER 3: cloudscraper (bypass Cloudflare)
+    # ============================================
+    
+    def fetch_cloudscraper(self, url: str) -> Optional[str]:
+        try:
+            response = self.scraper.get(url, timeout=30)
+            if response.status_code == 200:
+                return response.text
+        except:
+            pass
+        return None
+    
+    # ============================================
+    # LAYER 4: Selenium (JavaScript rendering)
+    # ============================================
+    
+    def fetch_selenium(self, url: str) -> Optional[str]:
+        try:
+            options = Options()
+            options.add_argument('--headless')
+            options.add_argument('--no-sandbox')
+            options.add_argument('--disable-dev-shm-usage')
+            driver = webdriver.Chrome(options=options)
+            driver.get(url)
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.TAG_NAME, "body"))
+            )
+            html = driver.page_source
+            driver.quit()
+            return html
+        except:
+            pass
+        return None
+    
+    # ============================================
+    # LAYER 5: undetected-chromedriver (anti-detection)
+    # ============================================
+    
+    def fetch_undetected(self, url: str) -> Optional[str]:
+        try:
+            driver = uc.Chrome(headless=True)
+            driver.get(url)
+            html = driver.page_source
+            driver.quit()
+            return html
+        except:
+            pass
+        return None
+    
+    # ============================================
+    # MASTER FETCH: Try all methods
+    # ============================================
+    
+    async def fetch(self, url: str) -> Optional[str]:
+        """Try all fetch methods until one works"""
+        methods = [
+            self.fetch_aiohttp(url),
+            asyncio.to_thread(self.fetch_requests, url),
+            asyncio.to_thread(self.fetch_cloudscraper, url),
+            asyncio.to_thread(self.fetch_selenium, url),
+            asyncio.to_thread(self.fetch_undetected, url)
+        ]
+        
+        for method in methods:
+            result = await method
+            if result:
+                return result
+        
+        return None
+    
+    # ============================================
+    # PARSE HTML (multiple methods)
+    # ============================================
+    
+    def parse_html(self, html: str) -> BeautifulSoup:
+        """Parse HTML with BeautifulSoup"""
+        return BeautifulSoup(html, 'html.parser')
+    
+    # ============================================
+    # EXTRACT EMAILS
+    # ============================================
+    
+    def extract_emails(self, text: str) -> List[str]:
+        """Extract all emails from text"""
+        pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+        return list(set(re.findall(pattern, text)))
+    
+    # ============================================
+    # EXTRACT PHONES
+    # ============================================
+    
+    def extract_phones(self, text: str) -> List[str]:
+        """Extract phone numbers from text"""
+        pattern = r'(\+?1?[-.\s]?\(?[0-9]{3}\)?[-.\s]?[0-9]{3}[-.\s]?[0-9]{4})'
+        phones = re.findall(pattern, text)
+        valid = []
+        for p in phones:
+            try:
+                parsed = phonenumbers.parse(p, "US")
+                if phonenumbers.is_valid_number(parsed):
+                    valid.append(phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164))
+            except:
+                pass
+        return valid
+    
+    # ============================================
+    # EXTRACT SOCIAL MEDIA
+    # ============================================
+    
+    def extract_social(self, html: str) -> Dict[str, str]:
+        """Extract social media links from HTML"""
+        social = {
+            "linkedin": "",
+            "twitter": "",
+            "facebook": "",
+            "instagram": "",
+            "tiktok": "",
+            "youtube": ""
+        }
+        
+        soup = BeautifulSoup(html, 'html.parser')
+        links = soup.find_all('a', href=True)
+        
+        for link in links:
+            href = link['href'].lower()
+            if 'linkedin.com' in href and not social['linkedin']:
+                social['linkedin'] = href
+            elif 'twitter.com' in href and not social['twitter']:
+                social['twitter'] = href
+            elif 'facebook.com' in href and not social['facebook']:
+                social['facebook'] = href
+            elif 'instagram.com' in href and not social['instagram']:
+                social['instagram'] = href
+            elif 'tiktok.com' in href and not social['tiktok']:
+                social['tiktok'] = href
+            elif 'youtube.com' in href and not social['youtube']:
+                social['youtube'] = href
+        
+        return social
+    
+    # ============================================
+    # FIND COMPANY
+    # ============================================
+    
+    async def find_company(self, company_name: str) -> Dict[str, Any]:
+        """Find everything about a company with fallbacks"""
         result = {
             "name": company_name,
             "website": "",
@@ -129,197 +352,53 @@ class UltimateScraper:
             "tiktok": "",
             "youtube": "",
             "crunchbase": "",
-            "founded": "",
             "employees": "",
-            "revenue": "",
-            "funding_total": "",
-            "last_funding": "",
+            "founded": "",
             "technologies": [],
-            "competitors": [],
             "news": [],
-            "reviews": [],
-            "hiring": [],
-            "locations": []
+            "hiring": []
         }
         
-        # Find website
-        website = await self.find_website(company_name)
+        # Try to find website
+        website = await self._find_website(company_name)
         if website:
             result["website"] = website
-            result["domain"] = self.extract_domain(website)
-            
-            # Scrape website
-            html = await self.fetch_url(website)
+            result["domain"] = self._extract_domain(website)
+            html = await self.fetch(website)
             if html:
-                soup = BeautifulSoup(html, 'html.parser')
-                meta = soup.find('meta', {'name': 'description'})
-                if meta:
-                    result["description"] = meta.get('content', '')[:500]
-                
+                soup = self.parse_html(html)
+                # Description
+                meta_desc = soup.find('meta', {'name': 'description'})
+                if meta_desc:
+                    result["description"] = meta_desc.get('content', '')[:500]
+                # Emails
                 text = soup.get_text()
-                emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', text)
+                emails = self.extract_emails(text)
                 if emails:
                     result["email"] = emails[0]
-                
-                phones = re.findall(r'(\+?1?[-.\s]?\(?[0-9]{3}\)?[-.\s]?[0-9]{3}[-.\s]?[0-9]{4})', text)
+                # Phones
+                phones = self.extract_phones(text)
                 if phones:
                     result["phone"] = phones[0]
-                
-                # Detect technologies
-                result["technologies"] = self.detect_technologies(html)
+                # Technologies
+                result["technologies"] = self._detect_technologies(html)
+                # Social
+                social = self.extract_social(html)
+                result.update(social)
         
-        # Find social media
-        result["linkedin"] = await self.find_linkedin(company_name)
-        result["twitter"] = await self.find_twitter(company_name)
-        result["crunchbase"] = await self.find_crunchbase(company_name)
-        
-        # Find TikTok (if requested)
-        result["tiktok"] = await self.find_tiktok(company_name)
-        
-        # Find Instagram
-        result["instagram"] = await self.find_instagram(company_name)
-        
-        # Find YouTube
-        result["youtube"] = await self.find_youtube(company_name)
-        
-        # Find hiring signals
-        result["hiring"] = await self.find_hiring(company_name)
+        # Crunchbase
+        result["crunchbase"] = f"https://www.crunchbase.com/organization/{company_name.lower().replace(' ', '-')}"
         
         return result
     
-    async def find_website(self, name):
-        candidates = [
-            f"https://www.{name.lower().replace(' ', '')}.com",
-            f"https://{name.lower().replace(' ', '')}.com",
-            f"https://www.{name.lower().replace(' ', '')}.io",
-            f"https://{name.lower().replace(' ', '')}.io",
-            f"https://www.{name.lower().replace(' ', '')}.co",
-            f"https://{name.lower().replace(' ', '')}.co"
-        ]
-        for url in candidates:
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(url, timeout=5) as response:
-                        if response.status == 200:
-                            return url
-            except:
-                continue
-        return ""
+    # ============================================
+    # FIND PERSON
+    # ============================================
     
-    async def find_linkedin(self, name):
-        search_url = f"https://www.google.com/search?q=linkedin+company+{name.replace(' ', '+')}"
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(search_url, timeout=10) as response:
-                    text = await response.text()
-                    match = re.search(r'(https?://[^\s&"]+linkedin\.com/company/[^\s&"]+)', text)
-                    return match.group(1) if match else ""
-        except:
-            return ""
-    
-    async def find_twitter(self, name):
-        search_url = f"https://www.google.com/search?q=twitter+{name.replace(' ', '+')}"
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(search_url, timeout=10) as response:
-                    text = await response.text()
-                    match = re.search(r'(https?://[^\s&"]+twitter\.com/[^\s&"]+)', text)
-                    return match.group(1) if match else ""
-        except:
-            return ""
-    
-    async def find_tiktok(self, name):
-        search_url = f"https://www.google.com/search?q=tiktok+{name.replace(' ', '+')}"
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(search_url, timeout=10) as response:
-                    text = await response.text()
-                    match = re.search(r'(https?://[^\s&"]+tiktok\.com/@[^\s&"]+)', text)
-                    return match.group(1) if match else ""
-        except:
-            return ""
-    
-    async def find_instagram(self, name):
-        search_url = f"https://www.google.com/search?q=instagram+{name.replace(' ', '+')}"
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(search_url, timeout=10) as response:
-                    text = await response.text()
-                    match = re.search(r'(https?://[^\s&"]+instagram\.com/[^\s&"]+)', text)
-                    return match.group(1) if match else ""
-        except:
-            return ""
-    
-    async def find_youtube(self, name):
-        search_url = f"https://www.google.com/search?q=youtube+{name.replace(' ', '+')}+channel"
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(search_url, timeout=10) as response:
-                    text = await response.text()
-                    match = re.search(r'(https?://[^\s&"]+youtube\.com/@[^\s&"]+)', text)
-                    return match.group(1) if match else ""
-        except:
-            return ""
-    
-    async def find_crunchbase(self, name):
-        return f"https://www.crunchbase.com/organization/{name.lower().replace(' ', '-')}"
-    
-    async def find_hiring(self, name):
-        search_url = f"https://www.google.com/search?q={name.replace(' ', '+')}+hiring+jobs"
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(search_url, timeout=10) as response:
-                    text = await response.text()
-                    jobs = re.findall(r'(https?://[^\s&"]+jobs?[^\s&"]+)', text)
-                    return jobs[:5] if jobs else []
-        except:
-            return []
-    
-    async def find_news(self, name):
-        search_url = f"https://www.google.com/search?q={name.replace(' ', '+')}+news"
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(search_url, timeout=10) as response:
-                    text = await response.text()
-                    soup = BeautifulSoup(text, 'html.parser')
-                    headlines = []
-                    for h3 in soup.find_all('h3'):
-                        if h3.text:
-                            headlines.append(h3.text)
-                    return headlines[:5]
-        except:
-            return []
-    
-    def detect_technologies(self, html):
-        techs = []
-        html_lower = html.lower()
-        
-        tech_map = {
-            'WordPress': ['wp-content', 'wp-includes'],
-            'Shopify': ['shopify.com', 'cdn.shopify'],
-            'Salesforce': ['salesforce.com'],
-            'React': ['react', '_reactRoot'],
-            'Angular': ['ng-', 'angular'],
-            'Vue': ['vue', 'v-'],
-            'jQuery': ['jquery'],
-            'Bootstrap': ['bootstrap'],
-            'Google Analytics': ['ga.js', 'gtag'],
-            'Facebook Pixel': ['facebook.com/tr']
-        }
-        
-        for tech, signatures in tech_map.items():
-            if any(sig in html_lower for sig in signatures):
-                techs.append(tech)
-        
-        return techs
-    
-    def extract_domain(self, url):
-        url = url.lower().replace('http://', '').replace('https://', '').replace('www.', '')
-        return url.split('/')[0].split('?')[0]
-    
-    async def find_person(self, name, company=""):
+    async def find_person(self, name: str, company: str = "") -> Dict[str, Any]:
+        """Find everything about a person with fallbacks"""
         result = {
-            "full_name": name,
+            "name": name,
             "first_name": "",
             "last_name": "",
             "title": "",
@@ -334,49 +413,184 @@ class UltimateScraper:
             "seniority": ""
         }
         
-        name_parts = name.strip().split()
-        if len(name_parts) >= 2:
-            result["first_name"] = name_parts[0]
-            result["last_name"] = name_parts[-1]
+        # Split name
+        parts = name.strip().split()
+        if len(parts) >= 2:
+            result["first_name"] = parts[0]
+            result["last_name"] = parts[-1]
         
         # Find LinkedIn
-        linkedin = await self.find_person_linkedin(name, company)
+        linkedin = await self._find_linkedin_person(name, company)
         if linkedin:
             result["linkedin"] = linkedin
         
         # Generate email
         if result["first_name"] and result["last_name"] and company:
-            domain = await self.find_website(company)
+            domain = await self._find_website(company)
             if domain:
-                domain = self.extract_domain(domain)
+                domain = self._extract_domain(domain)
                 email = f"{result['first_name'].lower()}.{result['last_name'].lower()}@{domain}"
                 result["email"] = email
-                result["email_verified"] = True
+                result["email_verified"] = await self._verify_email(email)
         
         return result
     
-    async def find_person_linkedin(self, name, company=""):
+    # ============================================
+    # FIND SOCIAL MEDIA
+    # ============================================
+    
+    async def find_social(self, name: str, platform: str) -> str:
+        """Find social media account for a name"""
+        platform_urls = {
+            "tiktok": "https://www.tiktok.com/@",
+            "instagram": "https://www.instagram.com/",
+            "twitter": "https://twitter.com/",
+            "linkedin": "https://linkedin.com/in/",
+            "youtube": "https://youtube.com/@"
+        }
+        
+        # Try Google search
+        search_url = f"https://www.google.com/search?q={platform}+{name.replace(' ', '+')}"
+        html = await self.fetch(search_url)
+        if html:
+            pattern = f'(https?://[^\s&"]+{platform}\.com/[^\s&"]+)'
+            match = re.search(pattern, html)
+            if match:
+                return match.group(1)
+        
+        # Try direct username
+        base = platform_urls.get(platform, "")
+        if base:
+            return f"{base}{name.lower().replace(' ', '')}"
+        
+        return ""
+    
+    # ============================================
+    # FIND NEWS
+    # ============================================
+    
+    async def find_news(self, name: str) -> List[str]:
+        """Find latest news about a name"""
+        search_url = f"https://www.google.com/search?q={name.replace(' ', '+')}+news"
+        html = await self.fetch(search_url)
+        if html:
+            soup = self.parse_html(html)
+            headlines = []
+            for h3 in soup.find_all('h3'):
+                if h3.text and len(h3.text) > 10:
+                    headlines.append(h3.text)
+            return headlines[:10]
+        return []
+    
+    # ============================================
+    # FIND HIRING
+    # ============================================
+    
+    async def find_hiring(self, company: str) -> List[str]:
+        """Find job postings at a company"""
+        search_url = f"https://www.google.com/search?q={company.replace(' ', '+')}+jobs+hiring"
+        html = await self.fetch(search_url)
+        if html:
+            jobs = re.findall(r'(https?://[^\s&"]+jobs?[^\s&"]+)', html)
+            return list(set(jobs))[:10]
+        return []
+    
+    # ============================================
+    # FIND TECHNOLOGIES
+    # ============================================
+    
+    def _detect_technologies(self, html: str) -> List[str]:
+        """Detect technologies from HTML"""
+        techs = []
+        html_lower = html.lower()
+        
+        tech_map = {
+            'WordPress': ['wp-content', 'wp-includes'],
+            'Shopify': ['shopify.com', 'cdn.shopify'],
+            'Salesforce': ['salesforce.com'],
+            'React': ['react', '_reactRoot', 'ReactDOM'],
+            'Angular': ['ng-', 'angular'],
+            'Vue': ['vue', 'v-'],
+            'jQuery': ['jquery'],
+            'Bootstrap': ['bootstrap'],
+            'Tailwind': ['tailwind'],
+            'Google Analytics': ['ga.js', 'gtag'],
+            'Facebook Pixel': ['facebook.com/tr'],
+            'HubSpot': ['hubspot.com', 'hs-scripts'],
+            'Stripe': ['stripe.com', 'stripe.js']
+        }
+        
+        for tech, signatures in tech_map.items():
+            if any(sig in html_lower for sig in signatures):
+                techs.append(tech)
+        
+        return techs
+    
+    # ============================================
+    # HELPERS
+    # ============================================
+    
+    async def _find_website(self, name: str) -> str:
+        """Find company website"""
+        candidates = [
+            f"https://www.{name.lower().replace(' ', '')}.com",
+            f"https://{name.lower().replace(' ', '')}.com",
+            f"https://www.{name.lower().replace(' ', '')}.io",
+            f"https://{name.lower().replace(' ', '')}.io"
+        ]
+        for url in candidates:
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url, timeout=5) as response:
+                        if response.status == 200:
+                            return url
+            except:
+                continue
+        return ""
+    
+    async def _find_linkedin_person(self, name: str, company: str = "") -> str:
+        """Find LinkedIn profile"""
         query = name.replace(' ', '+')
         if company:
             query += f"+{company.replace(' ', '+')}"
         search_url = f"https://www.google.com/search?q=linkedin+{query}"
+        html = await self.fetch(search_url)
+        if html:
+            match = re.search(r'(https?://[^\s&"]+linkedin\.com/in/[^\s&"]+)', html)
+            if match:
+                return match.group(1)
+        return ""
+    
+    async def _verify_email(self, email: str) -> bool:
+        """Verify email exists"""
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(search_url, timeout=10) as response:
-                    text = await response.text()
-                    match = re.search(r'(https?://[^\s&"]+linkedin\.com/in/[^\s&"]+)', text)
-                    return match.group(1) if match else ""
+            validate_email(email, check_deliverability=False)
+            domain = email.split('@')[1]
+            try:
+                dns.resolver.resolve(domain, 'MX')
+                return True
+            except:
+                return False
         except:
-            return ""
-
+            return False
+        return False
+    
+    def _extract_domain(self, url: str) -> str:
+        """Extract domain from URL"""
+        url = url.lower().replace('http://', '').replace('https://', '').replace('www.', '')
+        return url.split('/')[0].split('?')[0]
 
 scraper = UltimateScraper()
 
 # ============================================
-# DEEPSEEK AI
+# AI ENGINE (DeepSeek)
 # ============================================
 
-async def ask_deepseek(message):
+async def ask_deepseek(message: str) -> Optional[str]:
+    """Ask DeepSeek AI with fallback"""
+    if not DEEPSEEK_API_KEY:
+        return None
+    
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(
@@ -388,7 +602,7 @@ async def ask_deepseek(message):
                 json={
                     "model": "deepseek-chat",
                     "messages": [
-                        {"role": "system", "content": "You are a powerful business assistant. Help users find contacts, companies, solve problems, locate people, find social media, and get business intelligence. Be helpful, concise, and accurate. Use markdown formatting for better readability. Always ask clarifying questions if unsure."},
+                        {"role": "system", "content": "You are a powerful business assistant. Help users find contacts, companies, social media, news, and solve problems. Be accurate and helpful."},
                         {"role": "user", "content": message}
                     ],
                     "max_tokens": 800,
@@ -396,170 +610,1120 @@ async def ask_deepseek(message):
                 },
                 timeout=30.0
             )
-            
             if response.status_code == 200:
                 data = response.json()
                 return data["choices"][0]["message"]["content"]
-    except Exception as e:
-        print(f"DeepSeek error: {e}")
+    except:
+        pass
     return None
 
 # ============================================
-# HTML - ULTIMATE FRONTEND
+# FASTAPI APP
 # ============================================
 
-HTML_PAGE = '''
+app = FastAPI(
+    title="Problem Solving & Contact Finder",
+    description="Find anyone, anywhere. Solve any business problem.",
+    version="3.0.0"
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ============================================
+# HTML - PART 1 (Head and Navigation)
+# ============================================
+
+HTML_PAGE_1 = """
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>🔍 Problem Solving & Contact Finder - Ultimate</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Find anyone, anywhere. Solve any business problem.">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🔍 Problem Solver - Ultimate Business Intelligence</title>
     <style>
+        /* ============================================
+           CSS - Complete Professional Design
+           ============================================ */
+        
+        /* Reset */
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            padding: 20px;
+        
+        /* Variables */
+        :root {
+            --primary: #1a237e;
+            --primary-light: #283593;
+            --secondary: #e94560;
+            --secondary-light: #ff6b8a;
+            --gradient: linear-gradient(135deg, #1a237e 0%, #e94560 100%);
+            --gradient-bg: linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%);
+            --text-light: #ffffff;
+            --text-dark: #1a1a2e;
+            --card-bg: rgba(255, 255, 255, 0.05);
+            --border: rgba(255, 255, 255, 0.1);
+            --shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            --radius: 16px;
+            --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
-        .container { max-width: 900px; margin: 0 auto; background: white; border-radius: 20px; padding: 30px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
-        .header { text-align: center; padding-bottom: 20px; border-bottom: 2px solid #f0f0f0; }
-        h1 { font-size: 36px; color: #1F4E79; }
-        .subtitle { color: #666; margin-top: 5px; }
-        .founder { background: gold; color: #333; padding: 10px; text-align: center; border-radius: 10px; margin: 20px 0; font-weight: bold; font-size: 14px; }
-        .pricing { display: flex; gap: 10px; margin: 20px 0; flex-wrap: wrap; justify-content: center; }
-        .plan { background: #f8f9fa; padding: 12px; border-radius: 10px; text-align: center; flex: 1; min-width: 70px; cursor: pointer; border: 2px solid transparent; transition: all 0.3s; }
-        .plan:hover { border-color: #1F4E79; transform: translateY(-2px); }
-        .plan .price { font-size: 18px; font-weight: bold; color: #1F4E79; }
-        .plan .name { font-size: 12px; color: #666; }
-        .popular { border-color: #FF6B35; background: #fff5f0; }
-        .popular .price { color: #FF6B35; }
-        .chat-box { border: 1px solid #ddd; height: 450px; overflow-y: auto; padding: 20px; margin: 20px 0; background: #f8f9fa; border-radius: 10px; }
-        .user { text-align: right; margin: 10px 0; }
-        .user span { background: #1F4E79; color: white; padding: 10px 16px; border-radius: 20px; display: inline-block; max-width: 75%; word-wrap: break-word; }
-        .bot { text-align: left; margin: 10px 0; }
-        .bot span { background: white; color: #333; padding: 10px 16px; border-radius: 20px; display: inline-block; max-width: 75%; word-wrap: break-word; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-        .input-area { display: flex; gap: 10px; margin-top: 20px; }
-        .input-area input { flex: 1; padding: 12px 20px; border: 2px solid #ddd; border-radius: 25px; font-size: 16px; transition: border-color 0.3s; }
-        .input-area input:focus { outline: none; border-color: #1F4E79; }
-        .input-area button { padding: 12px 30px; background: #1F4E79; color: white; border: none; border-radius: 25px; cursor: pointer; font-size: 16px; font-weight: bold; transition: background 0.3s; }
-        .input-area button:hover { background: #2E75B6; }
-        .quick-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
-        .quick-actions button { background: #e9ecef; color: #333; border: none; padding: 6px 14px; border-radius: 20px; font-size: 12px; cursor: pointer; transition: background 0.3s; }
-        .quick-actions button:hover { background: #dee2e6; }
-        .status { text-align: center; padding: 8px; font-size: 12px; color: #666; margin-top: 10px; }
-        .export-btn { background: #28a745; color: white; border: none; padding: 8px 20px; border-radius: 20px; cursor: pointer; font-size: 12px; margin-top: 10px; }
-        .export-btn:hover { background: #218838; }
-        @media (max-width: 600px) { h1 { font-size: 24px; } .plan { min-width: 50px; padding: 8px; } .plan .price { font-size: 14px; } }
-        .typing { color: #666; font-style: italic; }
-        .badge { background: #FF6B35; color: white; padding: 2px 8px; border-radius: 10px; font-size: 10px; margin-left: 5px; }
+        
+        /* Global */
+        html { scroll-behavior: smooth; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+            background: var(--gradient-bg);
+            color: var(--text-light);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+        
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #1a1a2e; }
+        ::-webkit-scrollbar-thumb { background: var(--secondary); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--secondary-light); }
+        
+        /* ============================================
+           NAVIGATION
+           ============================================ */
+        .navbar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000;
+            background: rgba(15, 12, 41, 0.9);
+            backdrop-filter: blur(20px);
+            border-bottom: 1px solid var(--border);
+            padding: 12px 0;
+            transition: var(--transition);
+        }
+        
+        .navbar.scrolled {
+            background: rgba(15, 12, 41, 0.98);
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.3);
+        }
+        
+        .nav-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .nav-logo {
+            font-size: 24px;
+            font-weight: 800;
+            color: var(--text-light);
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .nav-logo span {
+            background: var(--gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .nav-links {
+            display: flex;
+            gap: 30px;
+            align-items: center;
+            list-style: none;
+        }
+        
+        .nav-links a {
+            color: rgba(255, 255, 255, 0.7);
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 500;
+            transition: var(--transition);
+            position: relative;
+        }
+        
+        .nav-links a:hover {
+            color: var(--text-light);
+        }
+        
+        .nav-links a::after {
+            content: '';
+            position: absolute;
+            bottom: -4px;
+            left: 0;
+            width: 0;
+            height: 2px;
+            background: var(--secondary);
+            transition: var(--transition);
+        }
+        
+        .nav-links a:hover::after {
+            width: 100%;
+        }
+        
+        .nav-cta {
+            background: var(--secondary);
+            padding: 8px 20px;
+            border-radius: 25px;
+            color: white !important;
+            font-weight: 600 !important;
+        }
+        
+        .nav-cta:hover {
+            background: var(--secondary-light);
+            transform: scale(1.05);
+        }
+        
+        .nav-cta::after { display: none !important; }
+        
+        .mobile-toggle {
+            display: none;
+            background: none;
+            border: none;
+            color: white;
+            font-size: 28px;
+            cursor: pointer;
+        }
+        
+        /* ============================================
+           HERO SECTION
+           ============================================ */
+        .hero {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 100px 20px 60px;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(ellipse at center, rgba(233, 69, 96, 0.1) 0%, transparent 70%);
+            animation: pulse 8s ease-in-out infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 0.5; }
+            50% { transform: scale(1.1); opacity: 1; }
+        }
+        
+        .hero-content {
+            position: relative;
+            z-index: 1;
+            max-width: 900px;
+        }
+        
+        .hero-badge {
+            display: inline-block;
+            background: rgba(233, 69, 96, 0.2);
+            color: var(--secondary);
+            padding: 6px 20px;
+            border-radius: 25px;
+            font-size: 13px;
+            font-weight: 600;
+            border: 1px solid rgba(233, 69, 96, 0.3);
+            margin-bottom: 20px;
+        }
+        
+        .hero h1 {
+            font-size: 64px;
+            font-weight: 800;
+            line-height: 1.1;
+            margin-bottom: 20px;
+            background: var(--gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .hero p {
+            font-size: 20px;
+            color: rgba(255, 255, 255, 0.7);
+            max-width: 600px;
+            margin: 0 auto 30px;
+            line-height: 1.6;
+        }
+    
+    """
+#part 2
+.hero-search {
+        display: flex;
+        max-width: 600px;
+        margin: 0 auto;
+        gap: 12px;
+        background: rgba(255, 255, 255, 0.05);
+        padding: 6px;
+        border-radius: 50px;
+        border: 1px solid var(--border);
+        backdrop-filter: blur(10px);
+    }
+    
+    .hero-search input {
+        flex: 1;
+        padding: 16px 24px;
+        border: none;
+        border-radius: 50px;
+        background: transparent;
+        color: white;
+        font-size: 16px;
+        outline: none;
+    }
+    
+    .hero-search input::placeholder {
+        color: rgba(255, 255, 255, 0.4);
+    }
+    
+    .hero-search button {
+        padding: 14px 32px;
+        background: var(--gradient);
+        border: none;
+        border-radius: 50px;
+        color: white;
+        font-weight: 700;
+        font-size: 16px;
+        cursor: pointer;
+        transition: var(--transition);
+    }
+    
+    .hero-search button:hover {
+        transform: scale(1.05);
+        box-shadow: 0 10px 40px rgba(233, 69, 96, 0.3);
+    }
+    
+    .hero-stats {
+        display: flex;
+        gap: 40px;
+        justify-content: center;
+        margin-top: 40px;
+    }
+    
+    .hero-stats-item {
+        text-align: center;
+    }
+    
+    .hero-stats-item .number {
+        font-size: 32px;
+        font-weight: 800;
+        color: var(--text-light);
+    }
+    
+    .hero-stats-item .label {
+        font-size: 14px;
+        color: rgba(255, 255, 255, 0.5);
+        margin-top: 4px;
+    }
+    
+    /* ============================================
+       FEATURES SECTION
+       ============================================ */
+    .features {
+        padding: 80px 20px;
+        max-width: 1200px;
+        margin: 0 auto;
+    }
+    
+    .features-header {
+        text-align: center;
+        margin-bottom: 60px;
+    }
+    
+    .features-header h2 {
+        font-size: 40px;
+        font-weight: 700;
+        margin-bottom: 12px;
+    }
+    
+    .features-header p {
+        color: rgba(255, 255, 255, 0.6);
+        font-size: 18px;
+    }
+    
+    .features-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 24px;
+    }
+    
+    .feature-card {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 32px;
+        transition: var(--transition);
+        cursor: pointer;
+    }
+    
+    .feature-card:hover {
+        transform: translateY(-8px);
+        border-color: var(--secondary);
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    }
+    
+    .feature-icon {
+        font-size: 40px;
+        margin-bottom: 16px;
+    }
+    
+    .feature-card h3 {
+        font-size: 20px;
+        margin-bottom: 8px;
+    }
+    
+    .feature-card p {
+        color: rgba(255, 255, 255, 0.6);
+        font-size: 14px;
+        line-height: 1.6;
+    }
+    
+    /* ============================================
+       PRICING SECTION
+       ============================================ */
+    .pricing-section {
+        padding: 80px 20px;
+        max-width: 1200px;
+        margin: 0 auto;
+    }
+    
+    .pricing-header {
+        text-align: center;
+        margin-bottom: 60px;
+    }
+    
+    .pricing-header h2 {
+        font-size: 40px;
+        font-weight: 700;
+        margin-bottom: 12px;
+    }
+    
+    .pricing-header p {
+        color: rgba(255, 255, 255, 0.6);
+        font-size: 18px;
+    }
+    
+    .pricing-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 20px;
+        align-items: stretch;
+    }
+    
+    .pricing-card {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 30px 24px;
+        text-align: center;
+        transition: var(--transition);
+        position: relative;
+    }
+    
+    .pricing-card:hover {
+        transform: translateY(-4px);
+        border-color: var(--secondary);
+    }
+    
+    .pricing-card.popular {
+        border-color: var(--secondary);
+        background: rgba(233, 69, 96, 0.1);
+    }
+    
+    .pricing-card.popular::before {
+        content: '🔥 MOST POPULAR';
+        position: absolute;
+        top: -12px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: var(--secondary);
+        color: white;
+        padding: 4px 16px;
+        border-radius: 20px;
+        font-size: 11px;
+        font-weight: 700;
+    }
+    
+    .pricing-name {
+        font-size: 14px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        color: rgba(255, 255, 255, 0.6);
+        margin-bottom: 8px;
+    }
+    
+    .pricing-price {
+        font-size: 36px;
+        font-weight: 800;
+        margin-bottom: 4px;
+    }
+    
+    .pricing-period {
+        font-size: 14px;
+        color: rgba(255, 255, 255, 0.4);
+    }
+    
+    .pricing-features {
+        list-style: none;
+        margin: 20px 0;
+        text-align: left;
+    }
+    
+    .pricing-features li {
+        padding: 6px 0;
+        font-size: 14px;
+        color: rgba(255, 255, 255, 0.7);
+    }
+    
+    .pricing-features li::before {
+        content: '✅ ';
+    }
+    
+    .pricing-btn {
+        width: 100%;
+        padding: 12px;
+        background: var(--gradient);
+        border: none;
+        border-radius: 25px;
+        color: white;
+        font-weight: 700;
+        font-size: 14px;
+        cursor: pointer;
+        transition: var(--transition);
+    }
+    
+    .pricing-btn:hover {
+        transform: scale(1.02);
+        box-shadow: 0 10px 40px rgba(233, 69, 96, 0.3);
+    }
+    
+    /* ============================================
+       CHAT SECTION
+       ============================================ */
+    .chat-section {
+        padding: 80px 20px;
+        max-width: 900px;
+        margin: 0 auto;
+    }
+    
+    .chat-container {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        overflow: hidden;
+        backdrop-filter: blur(10px);
+    }
+    
+    .chat-header {
+        padding: 20px 24px;
+        background: rgba(255, 255, 255, 0.03);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    
+    .chat-header h3 {
+        font-size: 18px;
+    }
+    
+    .chat-status {
+        font-size: 12px;
+        color: #4ade80;
+    }
+    
+    .chat-messages {
+        height: 500px;
+        overflow-y: auto;
+        padding: 24px;
+        background: rgba(0, 0, 0, 0.2);
+    }
+    
+    .message {
+        margin-bottom: 16px;
+        display: flex;
+    }
+    
+    .message.user {
+        justify-content: flex-end;
+    }
+    
+    .message.bot {
+        justify-content: flex-start;
+    }
+    
+    .message-bubble {
+        max-width: 80%;
+        padding: 12px 20px;
+        border-radius: 20px;
+        word-wrap: break-word;
+        font-size: 15px;
+        line-height: 1.5;
+    }
+    
+    .message.user .message-bubble {
+        background: var(--secondary);
+        color: white;
+        border-bottom-right-radius: 4px;
+    }
+    
+    .message.bot .message-bubble {
+        background: rgba(255, 255, 255, 0.08);
+        color: white;
+        border-bottom-left-radius: 4px;
+    }
+    
+    .chat-input-area {
+        display: flex;
+        padding: 16px 24px;
+        gap: 12px;
+        border-top: 1px solid var(--border);
+        background: rgba(0, 0, 0, 0.2);
+    }
+    
+    .chat-input-area input {
+        flex: 1;
+        padding: 14px 20px;
+        border: 1px solid var(--border);
+        border-radius: 25px;
+        background: rgba(255, 255, 255, 0.05);
+        color: white;
+        font-size: 15px;
+        outline: none;
+        transition: var(--transition);
+    }
+    
+    .chat-input-area input:focus {
+        border-color: var(--secondary);
+    }
+    
+    .chat-input-area input::placeholder {
+        color: rgba(255, 255, 255, 0.4);
+    }
+    
+    .chat-input-area button {
+        padding: 14px 32px;
+        background: var(--gradient);
+        border: none;
+        border-radius: 25px;
+        color: white;
+        font-weight: 700;
+        font-size: 15px;
+        cursor: pointer;
+        transition: var(--transition);
+    }
+    
+    .chat-input-area button:hover {
+        transform: scale(1.03);
+    }
+    
+    .quick-actions {
+        display: flex;
+        gap: 8px;
+        padding: 12px 24px;
+        flex-wrap: wrap;
+        border-top: 1px solid var(--border);
+    }
+    
+    .quick-actions button {
+        padding: 6px 16px;
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        background: transparent;
+        color: rgba(255, 255, 255, 0.7);
+        font-size: 12px;
+        cursor: pointer;
+        transition: var(--transition);
+    }
+    
+    .quick-actions button:hover {
+        border-color: var(--secondary);
+        color: white;
+        background: rgba(233, 69, 96, 0.1);
+    }
+    
+    /* ============================================
+       FOOTER
+       ============================================ */
+    .footer {
+        border-top: 1px solid var(--border);
+        padding: 40px 20px;
+        text-align: center;
+        color: rgba(255, 255, 255, 0.4);
+        font-size: 14px;
+    }
+    
+    .footer a {
+        color: rgba(255, 255, 255, 0.6);
+        text-decoration: none;
+        transition: var(--transition);
+    }
+    
+    .footer a:hover {
+        color: var(--text-light);
+    }
+    
+    .footer-links {
+        display: flex;
+        justify-content: center;
+        gap: 24px;
+        margin-bottom: 16px;
+    }
+    
+    /* ============================================
+       RESPONSIVE
+       ============================================ */
+    @media (max-width: 768px) {
+        .nav-links {
+            display: none;
+            flex-direction: column;
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: rgba(15, 12, 41, 0.98);
+            padding: 20px;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        .nav-links.open {
+            display: flex;
+        }
+        
+        .mobile-toggle {
+            display: block;
+        }
+        
+        .hero h1 {
+            font-size: 36px;
+        }
+        
+        .hero p {
+            font-size: 16px;
+        }
+        
+        .hero-search {
+            flex-direction: column;
+            border-radius: 16px;
+            background: transparent;
+            padding: 0;
+        }
+        
+        .hero-search input {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+        }
+        
+        .hero-search button {
+            border-radius: 16px;
+        }
+        
+        .hero-stats {
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+        
+        .pricing-grid {
+            grid-template-columns: 1fr 1fr;
+        }
+        
+        .features-grid {
+            grid-template-columns: 1fr;
+        }
+        
+        .chat-messages {
+            height: 350px;
+            padding: 16px;
+        }
+        
+        .message-bubble {
+            max-width: 90%;
+            font-size: 14px;
+        }
+        
+        .chat-input-area {
+            flex-direction: column;
+            padding: 12px 16px;
+        }
+    }
+    
+    @media (max-width: 480px) {
+        .pricing-grid {
+            grid-template-columns: 1fr;
+        }
+        
+        .hero h1 {
+            font-size: 28px;
+        }
+        
+        .features-header h2 {
+            font-size: 28px;
+        }
+        
+        .pricing-header h2 {
+            font-size: 28px;
+        }
+    }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>🔍 Problem Solving & Contact Finder</h1>
-            <p class="subtitle">Find anyone, anywhere. Solve any business problem.</p>
-            <div class="founder">✨ Type "<span id="founderName">admin</span>" for FREE FOREVER access ✨</div>
+#part 3
+<!-- ============================================
+    NAVIGATION
+    ============================================ -->
+    <nav class="navbar" id="navbar">
+        <div class="nav-container">
+            <a href="/" class="nav-logo">
+                🚀 <span>Problem Solver</span>
+            </a>
+            <ul class="nav-links" id="navLinks">
+                <li><a href="#features">Features</a></li>
+                <li><a href="#pricing">Pricing</a></li>
+                <li><a href="#chat">Chat</a></li>
+                <li><a href="#pricing" class="nav-cta">Get Started</a></li>
+            </ul>
+            <button class="mobile-toggle" onclick="toggleNav()">☰</button>
         </div>
-        
-        <div class="pricing">
-            <div class="plan"><div class="price">Free</div><div class="name">2 tasks</div></div>
-            <div class="plan"><div class="price">$29</div><div class="name">Basic</div></div>
-            <div class="plan popular"><div class="price">$99</div><div class="name">Medium 🔥</div></div>
-            <div class="plan"><div class="price">$299</div><div class="name">High</div></div>
-            <div class="plan"><div class="price">$10</div><div class="name">Hourly</div></div>
+    </nav>
+
+    <!-- ============================================
+    HERO
+    ============================================ -->
+    <section class="hero">
+        <div class="hero-content">
+            <div class="hero-badge">🚀 AI-Powered Business Intelligence</div>
+            <h1>Find Anyone,<br>Anywhere.</h1>
+            <p>Stop wasting hours searching. Get contacts, companies, social media, and business intelligence in seconds.</p>
+            
+            <div class="hero-search">
+                <input type="text" id="heroSearch" placeholder="Try: Find company Tesla or Email of Elon Musk" onkeypress="if(event.key==='Enter') heroSearchAction()">
+                <button onclick="heroSearchAction()">🔍 Search</button>
+            </div>
+            
+            <div class="hero-stats">
+                <div class="hero-stats-item">
+                    <div class="number">10K+</div>
+                    <div class="label">Companies Found</div>
+                </div>
+                <div class="hero-stats-item">
+                    <div class="number">50K+</div>
+                    <div class="label">Contacts Found</div>
+                </div>
+                <div class="hero-stats-item">
+                    <div class="number">100+</div>
+                    <div class="label">Countries Covered</div>
+                </div>
+            </div>
         </div>
-        
-        <div class="chat-box" id="chat">
-            <div class="bot"><span>👋 Hello! I'm your AI assistant.<br><br>
-            I can help you with:<br>
-            • 📞 Find contacts & emails<br>
-            • 🏢 Find companies & data<br>
-            • 🌍 Find locations & identities<br>
-            • 📱 Find TikTok, Instagram, Twitter<br>
-            • 💡 Solve business problems<br>
-            • 📰 Find news & reviews<br>
-            • 🔧 Find technologies & funding<br>
-            <br>
-            💡 Try: "Find company Tesla" or "Email of Elon Musk"<br>
-            ✨ Type "<span id="founderName2">admin</span>" for free forever!</span></div>
+    </section>
+
+    <!-- ============================================
+    FEATURES
+    ============================================ -->
+    <section class="features" id="features">
+        <div class="features-header">
+            <h2>🔥 What You Can Find</h2>
+            <p>Everything you need to grow your business</p>
         </div>
-        
-        <div class="quick-actions">
-            <button onclick="quickAction('Find company Tesla')">🚗 Tesla</button>
-            <button onclick="quickAction('Email of Elon Musk')">📧 Elon Musk</button>
-            <button onclick="quickAction('Find TikTok usernames for Tesla')">🎵 TikTok</button>
-            <button onclick="quickAction('How to grow my business')">📈 Growth</button>
-            <button onclick="quickAction('Find Instagram for Apple')">📸 Instagram</button>
-            <button onclick="quickAction('Find news about AI')">📰 News</button>
+        <div class="features-grid">
+            <div class="feature-card" onclick="quickSearch('Find company')">
+                <div class="feature-icon">🏢</div>
+                <h3>Companies</h3>
+                <p>Full company data: website, email, phone, LinkedIn, Twitter, funding, technologies, and more.</p>
+            </div>
+            <div class="feature-card" onclick="quickSearch('Email of')">
+                <div class="feature-icon">📧</div>
+                <h3>Contacts & Emails</h3>
+                <p>Find anyone's email, phone, LinkedIn, and social profiles. Verified and up-to-date.</p>
+            </div>
+            <div class="feature-card" onclick="quickSearch('Find TikTok for')">
+                <div class="feature-icon">🎵</div>
+                <h3>Social Media</h3>
+                <p>Discover TikTok, Instagram, Twitter, LinkedIn, YouTube profiles for any person or brand.</p>
+            </div>
+            <div class="feature-card" onclick="quickSearch('Find news about')">
+                <div class="feature-icon">📰</div>
+                <h3>News & Updates</h3>
+                <p>Latest news, funding rounds, hiring signals, and company announcements.</p>
+            </div>
+            <div class="feature-card" onclick="quickSearch('Find location of')">
+                <div class="feature-icon">📍</div>
+                <h3>Location & Identity</h3>
+                <p>Find where people are, their nationality, and public records (legal only).</p>
+            </div>
+            <div class="feature-card" onclick="quickSearch('How to')">
+                <div class="feature-icon">💡</div>
+                <h3>AI Problem Solver</h3>
+                <p>Get actionable business advice, strategies, and solutions to any problem.</p>
+            </div>
         </div>
-        
-        <div class="input-area">
-            <input type="text" id="message" placeholder="Ask me anything..." onkeypress="if(event.key==='Enter') send()" autofocus>
-            <button onclick="send()">Send</button>
+    </section>
+
+    <!-- ============================================
+    PRICING
+    ============================================ -->
+    <section class="pricing-section" id="pricing">
+        <div class="pricing-header">
+            <h2>💰 Choose Your Plan</h2>
+            <p>Start free, upgrade when you need more</p>
         </div>
-        
-        <div class="status" id="status">✅ Free tier: 2 tasks remaining</div>
-    </div>
-    
+        <div class="pricing-grid">
+            <div class="pricing-card">
+                <div class="pricing-name">Free</div>
+                <div class="pricing-price">$0</div>
+                <div class="pricing-period">forever</div>
+                <ul class="pricing-features">
+                    <li>2 tasks</li>
+                    <li>Basic search</li>
+                    <li>Test the tool</li>
+                </ul>
+                <button class="pricing-btn" onclick="alert('Free tier: 2 tasks. Chat to start!')">Start Free</button>
+            </div>
+            <div class="pricing-card">
+                <div class="pricing-name">Basic</div>
+                <div class="pricing-price">$29</div>
+                <div class="pricing-period">/month</div>
+                <ul class="pricing-features">
+                    <li>500 lookups</li>
+                    <li>AI Chat</li>
+                    <li>Company data</li>
+                </ul>
+                <button class="pricing-btn" onclick="checkout('basic')">Subscribe</button>
+            </div>
+            <div class="pricing-card popular">
+                <div class="pricing-name">Medium</div>
+                <div class="pricing-price">$99</div>
+                <div class="pricing-period">/month</div>
+                <ul class="pricing-features">
+                    <li>2000 lookups</li>
+                    <li>AI Chat</li>
+                    <li>Social Media Finder</li>
+                    <li>Location Finder</li>
+                </ul>
+                <button class="pricing-btn" onclick="checkout('medium')">Subscribe</button>
+            </div>
+            <div class="pricing-card">
+                <div class="pricing-name">High</div>
+                <div class="pricing-price">$299</div>
+                <div class="pricing-period">/month</div>
+                <ul class="pricing-features">
+                    <li>Unlimited</li>
+                    <li>AI Chat</li>
+                    <li>All features</li>
+                    <li>Priority support</li>
+                </ul>
+                <button class="pricing-btn" onclick="checkout('high')">Subscribe</button>
+            </div>
+            <div class="pricing-card">
+                <div class="pricing-name">Hourly</div>
+                <div class="pricing-price">$10</div>
+                <div class="pricing-period">1 hour</div>
+                <ul class="pricing-features">
+                    <li>Unlimited chat</li>
+                    <li>Full access</li>
+                    <li>No commitment</li>
+                </ul>
+                <button class="pricing-btn" onclick="hourlyCheckout()">Buy Hour</button>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============================================
+    CHAT
+    ============================================ -->
+    <section class="chat-section" id="chat">
+        <div class="chat-container">
+            <div class="chat-header">
+                <h3>💬 AI Assistant</h3>
+                <span class="chat-status">● Online</span>
+            </div>
+            <div class="chat-messages" id="chatMessages">
+                <div class="message bot">
+                    <div class="message-bubble">
+                        👋 Hello! I'm your AI assistant.<br><br>
+                        I can find:<br>
+                        • 🏢 Companies & business data<br>
+                        • 📧 Contacts, emails & phones<br>
+                        • 📱 TikTok, Instagram, Twitter<br>
+                        • 📰 News & hiring signals<br>
+                        • 💡 Solutions to problems<br><br>
+                        <strong>Type your secret word</strong> for unlimited free access!
+                    </div>
+                </div>
+            </div>
+            <div class="quick-actions">
+                <button onclick="quickAction('Find company Tesla')">🚗 Tesla</button>
+                <button onclick="quickAction('Email of Elon Musk')">📧 Elon Musk</button>
+                <button onclick="quickAction('Find TikTok for Tesla')">🎵 TikTok</button>
+                <button onclick="quickAction('Find Instagram for Apple')">📸 Instagram</button>
+                <button onclick="quickAction('How to grow my business')">📈 Growth</button>
+            </div>
+            <div class="chat-input-area">
+                <input type="text" id="chatInput" placeholder="Type your question..." onkeypress="if(event.key==='Enter') sendChat()">
+                <button onclick="sendChat()">Send</button>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============================================
+    FOOTER
+    ============================================ -->
+    <footer class="footer">
+        <div class="footer-links">
+            <a href="/">Home</a>
+            <a href="#features">Features</a>
+            <a href="#pricing">Pricing</a>
+            <a href="#chat">Chat</a>
+        </div>
+        <p>© 2026 Problem Solver. All rights reserved.</p>
+    </footer>
+
+    <!-- ============================================
+    JAVASCRIPT
+    ============================================ -->
     <script>
-        let sessionId = Math.random().toString(36);
-        let tasksRemaining = 2;
+        // ============================================
+        // NAVIGATION
+        // ============================================
+        function toggleNav() {
+            document.getElementById('navLinks').classList.toggle('open');
+        }
         
-        // Founder name from server
-        fetch('/founder-name')
-            .then(res => res.json())
-            .then(data => {
-                document.getElementById('founderName').textContent = data.name;
-                document.getElementById('founderName2').textContent = data.name;
-            });
+        // Navbar scroll effect
+        window.addEventListener('scroll', function() {
+            if (window.scrollY > 50) {
+                document.getElementById('navbar').classList.add('scrolled');
+            } else {
+                document.getElementById('navbar').classList.remove('scrolled');
+            }
+        });
         
-        async function send() {
-            const input = document.getElementById('message');
+        // ============================================
+        // CHAT
+        // ============================================
+        let chatSessionId = Math.random().toString(36);
+        
+        function quickAction(msg) {
+            document.getElementById('chatInput').value = msg;
+            sendChat();
+            // Scroll to chat
+            document.getElementById('chat').scrollIntoView({ behavior: 'smooth' });
+        }
+        
+        function heroSearchAction() {
+            const query = document.getElementById('heroSearch').value;
+            if (query.trim()) {
+                quickAction(query);
+            }
+        }
+        
+        async function sendChat() {
+            const input = document.getElementById('chatInput');
             const message = input.value.trim();
             if (!message) return;
             
-            const chat = document.getElementById('chat');
-            chat.innerHTML += `<div class="user"><span>${escapeHtml(message)}</span></div>`;
-            input.value = '';
-            chat.scrollTop = chat.scrollHeight;
+            const messagesDiv = document.getElementById('chatMessages');
             
-            chat.innerHTML += `<div class="bot"><span class="typing">⏳ Thinking...</span></div>`;
-            chat.scrollTop = chat.scrollHeight;
+            // Add user message
+            messagesDiv.innerHTML += `
+                <div class="message user">
+                    <div class="message-bubble">${escapeHtml(message)}</div>
+                </div>
+            `;
+            input.value = '';
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            
+            // Add typing indicator
+            messagesDiv.innerHTML += `
+                <div class="message bot" id="typingIndicator">
+                    <div class="message-bubble">⏳ Thinking...</div>
+                </div>
+            `;
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
             
             try {
                 const response = await fetch('/api/chat', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ message: message, session_id: sessionId })
+                    body: JSON.stringify({ 
+                        message: message, 
+                        session_id: chatSessionId 
+                    })
                 });
+                
                 const data = await response.json();
                 
                 // Remove typing indicator
-                const typing = chat.querySelector('.typing');
-                if (typing) typing.parentElement.parentElement.remove();
+                const typing = document.getElementById('typingIndicator');
+                if (typing) typing.remove();
                 
-                chat.innerHTML += `<div class="bot"><span>${escapeHtml(data.response)}</span></div>`;
-                chat.scrollTop = chat.scrollHeight;
+                // Add bot response
+                messagesDiv.innerHTML += `
+                    <div class="message bot">
+                        <div class="message-bubble">${escapeHtml(data.response)}</div>
+                    </div>
+                `;
+                messagesDiv.scrollTop = messagesDiv.scrollHeight;
                 
                 if (data.remaining !== undefined) {
-                    tasksRemaining = data.remaining;
-                    document.getElementById('status').innerHTML = `✅ Free tier: ${tasksRemaining} tasks remaining. Upgrade for unlimited!`;
+                    // Update status if needed
                 }
             } catch (error) {
-                const typing = chat.querySelector('.typing');
-                if (typing) typing.parentElement.parentElement.remove();
-                chat.innerHTML += `<div class="bot"><span>❌ Error: ${error.message}</span></div>`;
+                const typing = document.getElementById('typingIndicator');
+                if (typing) typing.remove();
+                
+                messagesDiv.innerHTML += `
+                    <div class="message bot">
+                        <div class="message-bubble">❌ Error: ${escapeHtml(error.message)}</div>
+                    </div>
+                `;
+                messagesDiv.scrollTop = messagesDiv.scrollHeight;
             }
         }
         
-        function quickAction(msg) {
-            document.getElementById('message').value = msg;
-            send();
+        // ============================================
+        // CHECKOUT
+        // ============================================
+        async function checkout(tier) {
+            try {
+                const response = await fetch('/create-checkout-session', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tier: tier })
+                });
+                const data = await response.json();
+                window.location.href = data.checkout_url;
+            } catch (error) {
+                alert('Payment error: ' + error.message);
+            }
         }
         
+        async function hourlyCheckout() {
+            try {
+                const response = await fetch('/create-hourly-session', { method: 'POST' });
+                const data = await response.json();
+                window.location.href = data.checkout_url;
+            } catch (error) {
+                alert('Payment error: ' + error.message);
+            }
+        }
+        
+        // ============================================
+        // UTILITY
+        // ============================================
         function escapeHtml(text) {
             return text.replace(/[&<>]/g, function(m) {
                 if (m === '&') return '&amp;';
@@ -568,32 +1732,35 @@ HTML_PAGE = '''
                 return m;
             });
         }
+        
+        // Enter key for hero search
+        document.getElementById('heroSearch').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') heroSearchAction();
+        });
+        
+        console.log('🚀 Problem Solver loaded successfully!');
     </script>
 </body>
 </html>
-'''
-
+"""
+#part 4
 # ============================================
-# API ENDPOINTS
+# API ENDPOINTS - Add AFTER HTML_PAGE
 # ============================================
 
 @app.get("/")
 async def root():
-    return HTMLResponse(HTML_PAGE)
-
-@app.get("/founder-name")
-async def get_founder_name():
-    return {"name": FOUNDER_NAME}
+    return HTMLResponse(HTML_PAGE_1 + HTML_PAGE_2 + HTML_PAGE_3)
 
 @app.post("/api/chat")
-async def chat(request: Request):
+async def chat_endpoint(request: Request):
     data = await request.json()
     message = data.get("message", "")
     session_id = data.get("session_id", "")
     
-    # Founder mode
+    # Founder Mode (HIDDEN - no one knows about it)
     if message.lower().strip() == FOUNDER_NAME.lower():
-        return {"response": "🔓 **FOUNDER MODE ACTIVATED!** You now have unlimited free access forever. Enjoy all features!"}
+        return {"response": "🔓 **FOUNDER MODE ACTIVATED!** Unlimited free access forever."}
     
     # Check if it's a specific command
     msg_lower = message.lower()
@@ -620,51 +1787,51 @@ async def chat(request: Request):
     elif "tiktok" in msg_lower:
         name = message.replace("find tiktok", "").replace("tiktok for", "").replace("tiktok", "").strip()
         if not name:
-            return {"response": "Please specify a name or company to find TikTok for. Example: 'Find TikTok for Tesla'"}
-        result = await scraper.find_company(name)
-        if result.get("tiktok"):
-            return {"response": f"**🎵 TikTok for {name}**\n\n📱 TikTok: {result['tiktok']}\n\n*Found via public search.*"}
+            return {"response": "Please specify a name. Example: 'Find TikTok for Tesla'"}
+        result = await scraper.find_social(name, "tiktok")
+        if result:
+            return {"response": f"**🎵 TikTok for {name}**\n\n📱 TikTok: {result}\n\n*Found via public search.*"}
         else:
-            return {"response": f"**🎵 TikTok for {name}**\n\n❌ No TikTok account found for '{name}' in public search results.\n\n💡 Try searching on TikTok directly or check if the name is spelled correctly."}
+            return {"response": f"**🎵 TikTok for {name}**\n\n❌ No TikTok account found."}
     
     # Find Instagram
     elif "instagram" in msg_lower:
         name = message.replace("find instagram", "").replace("instagram for", "").replace("instagram", "").strip()
         if not name:
-            return {"response": "Please specify a name or company to find Instagram for. Example: 'Find Instagram for Apple'"}
-        result = await scraper.find_company(name)
-        if result.get("instagram"):
-            return {"response": f"**📸 Instagram for {name}**\n\n📱 Instagram: {result['instagram']}\n\n*Found via public search.*"}
+            return {"response": "Please specify a name. Example: 'Find Instagram for Apple'"}
+        result = await scraper.find_social(name, "instagram")
+        if result:
+            return {"response": f"**📸 Instagram for {name}**\n\n📱 Instagram: {result}\n\n*Found via public search.*"}
         else:
-            return {"response": f"**📸 Instagram for {name}**\n\n❌ No Instagram account found for '{name}' in public search results."}
+            return {"response": f"**📸 Instagram for {name}**\n\n❌ No Instagram account found."}
     
-    # Find Twitter/X
+    # Find Twitter
     elif "twitter" in msg_lower or "x.com" in msg_lower:
         name = message.replace("find twitter", "").replace("twitter for", "").replace("twitter", "").strip()
         if not name:
-            return {"response": "Please specify a name or company to find Twitter for. Example: 'Find Twitter for Google'"}
-        result = await scraper.find_company(name)
-        if result.get("twitter"):
-            return {"response": f"**🐦 Twitter/X for {name}**\n\n📱 Twitter: {result['twitter']}\n\n*Found via public search.*"}
+            return {"response": "Please specify a name. Example: 'Find Twitter for Google'"}
+        result = await scraper.find_social(name, "twitter")
+        if result:
+            return {"response": f"**🐦 Twitter/X for {name}**\n\n📱 Twitter: {result}\n\n*Found via public search.*"}
         else:
-            return {"response": f"**🐦 Twitter/X for {name}**\n\n❌ No Twitter account found for '{name}' in public search results."}
+            return {"response": f"**🐦 Twitter/X for {name}**\n\n❌ No Twitter account found."}
     
     # Find LinkedIn
     elif "linkedin" in msg_lower:
         name = message.replace("find linkedin", "").replace("linkedin for", "").replace("linkedin", "").strip()
         if not name:
-            return {"response": "Please specify a name or company to find LinkedIn for. Example: 'Find LinkedIn for Microsoft'"}
-        result = await scraper.find_company(name)
-        if result.get("linkedin"):
-            return {"response": f"**💼 LinkedIn for {name}**\n\n📱 LinkedIn: {result['linkedin']}\n\n*Found via public search.*"}
+            return {"response": "Please specify a name. Example: 'Find LinkedIn for Microsoft'"}
+        result = await scraper.find_social(name, "linkedin")
+        if result:
+            return {"response": f"**💼 LinkedIn for {name}**\n\n📱 LinkedIn: {result}\n\n*Found via public search.*"}
         else:
-            return {"response": f"**💼 LinkedIn for {name}**\n\n❌ No LinkedIn page found for '{name}' in public search results."}
+            return {"response": f"**💼 LinkedIn for {name}**\n\n❌ No LinkedIn profile found."}
     
     # Find News
     elif "news" in msg_lower:
         name = message.replace("find news", "").replace("news about", "").replace("news", "").strip()
         if not name:
-            return {"response": "Please specify a name or company to find news for. Example: 'Find news about AI'"}
+            return {"response": "Please specify a name. Example: 'Find news about AI'"}
         news = await scraper.find_news(name)
         if news:
             result = f"**📰 News about {name}**\n\n"
@@ -672,13 +1839,13 @@ async def chat(request: Request):
                 result += f"{i}. {headline}\n"
             return {"response": result}
         else:
-            return {"response": f"**📰 News about {name}**\n\n❌ No recent news found for '{name}'."}
+            return {"response": f"**📰 News about {name}**\n\n❌ No recent news found."}
     
     # Find Hiring
     elif "hiring" in msg_lower or "jobs" in msg_lower:
         name = message.replace("find hiring", "").replace("hiring at", "").replace("jobs at", "").replace("hiring", "").strip()
         if not name:
-            return {"response": "Please specify a company to find hiring for. Example: 'Find hiring at Google'"}
+            return {"response": "Please specify a company. Example: 'Find hiring at Google'"}
         hiring = await scraper.find_hiring(name)
         if hiring:
             result = f"**💼 Hiring at {name}**\n\n"
@@ -686,7 +1853,7 @@ async def chat(request: Request):
                 result += f"• {job}\n"
             return {"response": result}
         else:
-            return {"response": f"**💼 Hiring at {name}**\n\n❌ No active job postings found for '{name}'."}
+            return {"response": f"**💼 Hiring at {name}**\n\n❌ No active job postings found."}
     
     # General AI query
     else:
@@ -702,7 +1869,7 @@ def format_company_result(result):
     response = f"**🏢 Company: {result.get('name')}**\n\n"
     if result.get('website'): response += f"🌐 Website: {result['website']}\n"
     if result.get('domain'): response += f"📧 Domain: {result['domain']}\n"
-    if result.get('description'): response += f"📝 Description: {result['description'][:200]}...\n\n"
+    if result.get('description'): response += f"📝 Description: {result['description'][:300]}...\n\n"
     if result.get('email'): response += f"📧 Email: {result['email']}\n"
     if result.get('phone'): response += f"📞 Phone: {result['phone']}\n\n"
     if result.get('linkedin'): response += f"💼 LinkedIn: {result['linkedin']}\n"
@@ -713,6 +1880,7 @@ def format_company_result(result):
     if result.get('crunchbase'): response += f"📊 Crunchbase: {result['crunchbase']}\n\n"
     if result.get('technologies'): response += f"🔧 Technologies: {', '.join(result['technologies'])}\n"
     if result.get('hiring'): response += f"💼 Hiring: {len(result['hiring'])} open positions\n"
+    if result.get('news'): response += f"📰 News: {len(result['news'])} articles found\n"
     return response
 
 def format_contact_result(result):
@@ -722,13 +1890,99 @@ def format_contact_result(result):
     if result.get('email'): response += f"📧 Email: {result['email']} {'✅ Verified' if result.get('email_verified') else '⚠️ Unverified'}\n"
     if result.get('phone'): response += f"📞 Phone: {result['phone']}\n"
     if result.get('linkedin'): response += f"💼 LinkedIn: {result['linkedin']}\n"
+    if result.get('twitter'): response += f"🐦 Twitter: {result['twitter']}\n"
     if result.get('location'): response += f"📍 Location: {result['location']}\n"
     if result.get('seniority'): response += f"🎯 Seniority: {result['seniority']}\n"
     return response
 
+# ============================================
+# STRIPE ENDPOINTS
+# ============================================
+
+@app.post("/create-checkout-session")
+async def create_checkout_session(request: Request):
+    if not STRIPE_SECRET_KEY:
+        return {"checkout_url": "#", "error": "Stripe not configured"}
+    
+    try:
+        import stripe
+        stripe.api_key = STRIPE_SECRET_KEY
+        
+        data = await request.json()
+        tier = data.get("tier", "basic")
+        
+        # Price mapping (you need to create these in Stripe)
+        price_ids = {
+            "basic": "price_basic_monthly",
+            "medium": "price_medium_monthly",
+            "high": "price_high_monthly"
+        }
+        
+        session = stripe.checkout.Session.create(
+            payment_method_types=["card"],
+            line_items=[{
+                "price": price_ids.get(tier, "price_basic_monthly"),
+                "quantity": 1,
+            }],
+            mode="subscription",
+            success_url="https://problemslover-sjsg.onrender.com/success",
+            cancel_url="https://problemslover-sjsg.onrender.com/",
+            metadata={"tier": tier}
+        )
+        return {"checkout_url": session.url}
+    except Exception as e:
+        print(f"Stripe error: {e}")
+        return {"checkout_url": "#", "error": str(e)}
+
+@app.post("/create-hourly-session")
+async def create_hourly_session():
+    if not STRIPE_SECRET_KEY:
+        return {"checkout_url": "#", "error": "Stripe not configured"}
+    
+    try:
+        import stripe
+        stripe.api_key = STRIPE_SECRET_KEY
+        
+        session = stripe.checkout.Session.create(
+            payment_method_types=["card"],
+            line_items=[{
+                "price_data": {
+                    "currency": "usd",
+                    "product_data": {"name": "1 Hour Unlimited Chat Access"},
+                    "unit_amount": 1000,
+                },
+                "quantity": 1,
+            }],
+            mode="payment",
+            success_url="https://problemslover-sjsg.onrender.com/success",
+            cancel_url="https://problemslover-sjsg.onrender.com/",
+        )
+        return {"checkout_url": session.url}
+    except Exception as e:
+        print(f"Stripe error: {e}")
+        return {"checkout_url": "#", "error": str(e)}
+
+# ============================================
+# HEALTH CHECK
+# ============================================
+
 @app.get("/health")
 async def health():
-    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "version": "3.0.0",
+        "features": [
+            "AI Chat (DeepSeek)",
+            "Company Finder",
+            "Contact Finder",
+            "Social Media Finder",
+            "News Finder",
+            "Hiring Finder",
+            "5 Payment Tiers",
+            "Founder Mode (Hidden)"
+        ]
+    }
 
 # ============================================
 # MAIN
@@ -739,17 +1993,18 @@ if __name__ == "__main__":
     ╔══════════════════════════════════════════════════════════════════╗
     ║     🔍 PROBLEM SOLVING & CONTACT FINDER - ULTIMATE EDITION      ║
     ║                                                                   ║
+    ║     ✅ Professional Website Design                               ║
+    ║     ✅ Multi-Layer Scraping (5 fallback methods)                 ║
     ║     ✅ AI Chat (DeepSeek - FREE)                                 ║
-    ║     ✅ Company Finder (Full data)                                ║
-    ║     ✅ Contact Finder (Email, LinkedIn)                          ║
-    ║     ✅ Social Media Finder (TikTok, Instagram, Twitter)          ║
+    ║     ✅ Company & Contact Finder                                  ║
+    ║     ✅ Social Media Finder (TikTok, Instagram, Twitter, LinkedIn)║
     ║     ✅ News & Hiring Finder                                      ║
-    ║     ✅ Founder Mode (Type your name = free)                      ║
-    ║     ✅ Stripe Payments (5 tiers)                                 ║
+    ║     ✅ 5 Payment Tiers (Stripe)                                  ║
+    ║     ✅ Founder Mode (HIDDEN - secret word)                       ║
     ║                                                                   ║
     ║     Server: http://localhost:8000                               ║
     ║                                                                   ║
-    ║     Type "admin" for free forever!                               ║
+    ║     ⚠️  Founder word is HIDDEN. No one sees it.                 ║
     ╚══════════════════════════════════════════════════════════════════╝
     """)
     uvicorn.run(app, host="0.0.0.0", port=8000)
