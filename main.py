@@ -61,7 +61,7 @@ import stripe  # ADD THIS IMPORT
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
 STRIPE_PUBLIC_KEY = os.environ.get("STRIPE_PUBLIC_KEY", "")
-FOUNDER_NAME = os.environ.get("FOUNDER_NAME", "founder2026")  # CHANGE THIS!
+FOUNDER_NAME = os.environ.get("FOUNDER_NAME", "")  # CHANGE THIS!
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./problemsolver.db")
 SECRET_KEY = os.environ.get("SECRET_KEY", secrets.token_urlsafe(32))
 
