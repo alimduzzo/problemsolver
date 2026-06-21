@@ -31,7 +31,6 @@ from bs4 import BeautifulSoup
 import cloudscraper
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
-import pandas as pd
 from io import BytesIO
 
 # ============================================
