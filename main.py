@@ -51,6 +51,7 @@ import pyotp
 import qrcode
 from io import BytesIO
 import base64
+import stripe  # ADD THIS IMPORT
 
 # ============================================
 # CONFIGURATION
@@ -60,7 +61,7 @@ import base64
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
 STRIPE_PUBLIC_KEY = os.environ.get("STRIPE_PUBLIC_KEY", "")
-FOUNDER_NAME = os.environ.get("FOUNDER_NAME", "")
+FOUNDER_NAME = os.environ.get("FOUNDER_NAME", "founder2026")  # CHANGE THIS!
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./problemsolver.db")
 SECRET_KEY = os.environ.get("SECRET_KEY", secrets.token_urlsafe(32))
 
@@ -636,10 +637,10 @@ app.add_middleware(
 )
 
 # ============================================
-# HTML - PART 1 (Head and Navigation)
+# COMPLETE HTML PAGE
 # ============================================
 
-HTML_PAGE_1 = """
+HTML_PAGE = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -647,14 +648,7 @@ HTML_PAGE_1 = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>🔍 Problem Solver - Ultimate Business Intelligence</title>
     <style>
-        /* ============================================
-           CSS - Complete Professional Design
-           ============================================ */
-        
-        /* Reset */
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        
-        /* Variables */
         :root {
             --primary: #1a237e;
             --primary-light: #283593;
@@ -670,8 +664,6 @@ HTML_PAGE_1 = """
             --radius: 16px;
             --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
-        
-        /* Global */
         html { scroll-behavior: smooth; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
@@ -680,16 +672,11 @@ HTML_PAGE_1 = """
             min-height: 100vh;
             overflow-x: hidden;
         }
-        
-        /* Scrollbar */
         ::-webkit-scrollbar { width: 8px; }
         ::-webkit-scrollbar-track { background: #1a1a2e; }
         ::-webkit-scrollbar-thumb { background: var(--secondary); border-radius: 4px; }
         ::-webkit-scrollbar-thumb:hover { background: var(--secondary-light); }
         
-        /* ============================================
-           NAVIGATION
-           ============================================ */
         .navbar {
             position: fixed;
             top: 0;
@@ -702,12 +689,7 @@ HTML_PAGE_1 = """
             padding: 12px 0;
             transition: var(--transition);
         }
-        
-        .navbar.scrolled {
-            background: rgba(15, 12, 41, 0.98);
-            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.3);
-        }
-        
+        .navbar.scrolled { background: rgba(15, 12, 41, 0.98); box-shadow: 0 4px 30px rgba(0,0,0,0.3); }
         .nav-container {
             max-width: 1200px;
             margin: 0 auto;
@@ -716,7 +698,6 @@ HTML_PAGE_1 = """
             justify-content: space-between;
             align-items: center;
         }
-        
         .nav-logo {
             font-size: 24px;
             font-weight: 800;
@@ -726,20 +707,17 @@ HTML_PAGE_1 = """
             align-items: center;
             gap: 10px;
         }
-        
         .nav-logo span {
             background: var(--gradient);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
         }
-        
         .nav-links {
             display: flex;
             gap: 30px;
             align-items: center;
             list-style: none;
         }
-        
         .nav-links a {
             color: rgba(255, 255, 255, 0.7);
             text-decoration: none;
@@ -748,11 +726,7 @@ HTML_PAGE_1 = """
             transition: var(--transition);
             position: relative;
         }
-        
-        .nav-links a:hover {
-            color: var(--text-light);
-        }
-        
+        .nav-links a:hover { color: var(--text-light); }
         .nav-links a::after {
             content: '';
             position: absolute;
@@ -763,11 +737,7 @@ HTML_PAGE_1 = """
             background: var(--secondary);
             transition: var(--transition);
         }
-        
-        .nav-links a:hover::after {
-            width: 100%;
-        }
-        
+        .nav-links a:hover::after { width: 100%; }
         .nav-cta {
             background: var(--secondary);
             padding: 8px 20px;
@@ -775,14 +745,8 @@ HTML_PAGE_1 = """
             color: white !important;
             font-weight: 600 !important;
         }
-        
-        .nav-cta:hover {
-            background: var(--secondary-light);
-            transform: scale(1.05);
-        }
-        
+        .nav-cta:hover { background: var(--secondary-light); transform: scale(1.05); }
         .nav-cta::after { display: none !important; }
-        
         .mobile-toggle {
             display: none;
             background: none;
@@ -792,9 +756,6 @@ HTML_PAGE_1 = """
             cursor: pointer;
         }
         
-        /* ============================================
-           HERO SECTION
-           ============================================ */
         .hero {
             min-height: 100vh;
             display: flex;
@@ -805,7 +766,6 @@ HTML_PAGE_1 = """
             position: relative;
             overflow: hidden;
         }
-        
         .hero::before {
             content: '';
             position: absolute;
@@ -816,18 +776,15 @@ HTML_PAGE_1 = """
             background: radial-gradient(ellipse at center, rgba(233, 69, 96, 0.1) 0%, transparent 70%);
             animation: pulse 8s ease-in-out infinite;
         }
-        
         @keyframes pulse {
             0%, 100% { transform: scale(1); opacity: 0.5; }
             50% { transform: scale(1.1); opacity: 1; }
         }
-        
         .hero-content {
             position: relative;
             z-index: 1;
             max-width: 900px;
         }
-        
         .hero-badge {
             display: inline-block;
             background: rgba(233, 69, 96, 0.2);
@@ -839,7 +796,6 @@ HTML_PAGE_1 = """
             border: 1px solid rgba(233, 69, 96, 0.3);
             margin-bottom: 20px;
         }
-        
         .hero h1 {
             font-size: 64px;
             font-weight: 800;
@@ -849,7 +805,6 @@ HTML_PAGE_1 = """
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
         }
-        
         .hero p {
             font-size: 20px;
             color: rgba(255, 255, 255, 0.7);
@@ -857,538 +812,382 @@ HTML_PAGE_1 = """
             margin: 0 auto 30px;
             line-height: 1.6;
         }
-    
-    """
-#part 2
-.hero-search {
-        display: flex;
-        max-width: 600px;
-        margin: 0 auto;
-        gap: 12px;
-        background: rgba(255, 255, 255, 0.05);
-        padding: 6px;
-        border-radius: 50px;
-        border: 1px solid var(--border);
-        backdrop-filter: blur(10px);
-    }
-    
-    .hero-search input {
-        flex: 1;
-        padding: 16px 24px;
-        border: none;
-        border-radius: 50px;
-        background: transparent;
-        color: white;
-        font-size: 16px;
-        outline: none;
-    }
-    
-    .hero-search input::placeholder {
-        color: rgba(255, 255, 255, 0.4);
-    }
-    
-    .hero-search button {
-        padding: 14px 32px;
-        background: var(--gradient);
-        border: none;
-        border-radius: 50px;
-        color: white;
-        font-weight: 700;
-        font-size: 16px;
-        cursor: pointer;
-        transition: var(--transition);
-    }
-    
-    .hero-search button:hover {
-        transform: scale(1.05);
-        box-shadow: 0 10px 40px rgba(233, 69, 96, 0.3);
-    }
-    
-    .hero-stats {
-        display: flex;
-        gap: 40px;
-        justify-content: center;
-        margin-top: 40px;
-    }
-    
-    .hero-stats-item {
-        text-align: center;
-    }
-    
-    .hero-stats-item .number {
-        font-size: 32px;
-        font-weight: 800;
-        color: var(--text-light);
-    }
-    
-    .hero-stats-item .label {
-        font-size: 14px;
-        color: rgba(255, 255, 255, 0.5);
-        margin-top: 4px;
-    }
-    
-    /* ============================================
-       FEATURES SECTION
-       ============================================ */
-    .features {
-        padding: 80px 20px;
-        max-width: 1200px;
-        margin: 0 auto;
-    }
-    
-    .features-header {
-        text-align: center;
-        margin-bottom: 60px;
-    }
-    
-    .features-header h2 {
-        font-size: 40px;
-        font-weight: 700;
-        margin-bottom: 12px;
-    }
-    
-    .features-header p {
-        color: rgba(255, 255, 255, 0.6);
-        font-size: 18px;
-    }
-    
-    .features-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-        gap: 24px;
-    }
-    
-    .feature-card {
-        background: var(--card-bg);
-        border: 1px solid var(--border);
-        border-radius: var(--radius);
-        padding: 32px;
-        transition: var(--transition);
-        cursor: pointer;
-    }
-    
-    .feature-card:hover {
-        transform: translateY(-8px);
-        border-color: var(--secondary);
-        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-    }
-    
-    .feature-icon {
-        font-size: 40px;
-        margin-bottom: 16px;
-    }
-    
-    .feature-card h3 {
-        font-size: 20px;
-        margin-bottom: 8px;
-    }
-    
-    .feature-card p {
-        color: rgba(255, 255, 255, 0.6);
-        font-size: 14px;
-        line-height: 1.6;
-    }
-    
-    /* ============================================
-       PRICING SECTION
-       ============================================ */
-    .pricing-section {
-        padding: 80px 20px;
-        max-width: 1200px;
-        margin: 0 auto;
-    }
-    
-    .pricing-header {
-        text-align: center;
-        margin-bottom: 60px;
-    }
-    
-    .pricing-header h2 {
-        font-size: 40px;
-        font-weight: 700;
-        margin-bottom: 12px;
-    }
-    
-    .pricing-header p {
-        color: rgba(255, 255, 255, 0.6);
-        font-size: 18px;
-    }
-    
-    .pricing-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-        gap: 20px;
-        align-items: stretch;
-    }
-    
-    .pricing-card {
-        background: var(--card-bg);
-        border: 1px solid var(--border);
-        border-radius: var(--radius);
-        padding: 30px 24px;
-        text-align: center;
-        transition: var(--transition);
-        position: relative;
-    }
-    
-    .pricing-card:hover {
-        transform: translateY(-4px);
-        border-color: var(--secondary);
-    }
-    
-    .pricing-card.popular {
-        border-color: var(--secondary);
-        background: rgba(233, 69, 96, 0.1);
-    }
-    
-    .pricing-card.popular::before {
-        content: '🔥 MOST POPULAR';
-        position: absolute;
-        top: -12px;
-        left: 50%;
-        transform: translateX(-50%);
-        background: var(--secondary);
-        color: white;
-        padding: 4px 16px;
-        border-radius: 20px;
-        font-size: 11px;
-        font-weight: 700;
-    }
-    
-    .pricing-name {
-        font-size: 14px;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        color: rgba(255, 255, 255, 0.6);
-        margin-bottom: 8px;
-    }
-    
-    .pricing-price {
-        font-size: 36px;
-        font-weight: 800;
-        margin-bottom: 4px;
-    }
-    
-    .pricing-period {
-        font-size: 14px;
-        color: rgba(255, 255, 255, 0.4);
-    }
-    
-    .pricing-features {
-        list-style: none;
-        margin: 20px 0;
-        text-align: left;
-    }
-    
-    .pricing-features li {
-        padding: 6px 0;
-        font-size: 14px;
-        color: rgba(255, 255, 255, 0.7);
-    }
-    
-    .pricing-features li::before {
-        content: '✅ ';
-    }
-    
-    .pricing-btn {
-        width: 100%;
-        padding: 12px;
-        background: var(--gradient);
-        border: none;
-        border-radius: 25px;
-        color: white;
-        font-weight: 700;
-        font-size: 14px;
-        cursor: pointer;
-        transition: var(--transition);
-    }
-    
-    .pricing-btn:hover {
-        transform: scale(1.02);
-        box-shadow: 0 10px 40px rgba(233, 69, 96, 0.3);
-    }
-    
-    /* ============================================
-       CHAT SECTION
-       ============================================ */
-    .chat-section {
-        padding: 80px 20px;
-        max-width: 900px;
-        margin: 0 auto;
-    }
-    
-    .chat-container {
-        background: var(--card-bg);
-        border: 1px solid var(--border);
-        border-radius: var(--radius);
-        overflow: hidden;
-        backdrop-filter: blur(10px);
-    }
-    
-    .chat-header {
-        padding: 20px 24px;
-        background: rgba(255, 255, 255, 0.03);
-        border-bottom: 1px solid var(--border);
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-    }
-    
-    .chat-header h3 {
-        font-size: 18px;
-    }
-    
-    .chat-status {
-        font-size: 12px;
-        color: #4ade80;
-    }
-    
-    .chat-messages {
-        height: 500px;
-        overflow-y: auto;
-        padding: 24px;
-        background: rgba(0, 0, 0, 0.2);
-    }
-    
-    .message {
-        margin-bottom: 16px;
-        display: flex;
-    }
-    
-    .message.user {
-        justify-content: flex-end;
-    }
-    
-    .message.bot {
-        justify-content: flex-start;
-    }
-    
-    .message-bubble {
-        max-width: 80%;
-        padding: 12px 20px;
-        border-radius: 20px;
-        word-wrap: break-word;
-        font-size: 15px;
-        line-height: 1.5;
-    }
-    
-    .message.user .message-bubble {
-        background: var(--secondary);
-        color: white;
-        border-bottom-right-radius: 4px;
-    }
-    
-    .message.bot .message-bubble {
-        background: rgba(255, 255, 255, 0.08);
-        color: white;
-        border-bottom-left-radius: 4px;
-    }
-    
-    .chat-input-area {
-        display: flex;
-        padding: 16px 24px;
-        gap: 12px;
-        border-top: 1px solid var(--border);
-        background: rgba(0, 0, 0, 0.2);
-    }
-    
-    .chat-input-area input {
-        flex: 1;
-        padding: 14px 20px;
-        border: 1px solid var(--border);
-        border-radius: 25px;
-        background: rgba(255, 255, 255, 0.05);
-        color: white;
-        font-size: 15px;
-        outline: none;
-        transition: var(--transition);
-    }
-    
-    .chat-input-area input:focus {
-        border-color: var(--secondary);
-    }
-    
-    .chat-input-area input::placeholder {
-        color: rgba(255, 255, 255, 0.4);
-    }
-    
-    .chat-input-area button {
-        padding: 14px 32px;
-        background: var(--gradient);
-        border: none;
-        border-radius: 25px;
-        color: white;
-        font-weight: 700;
-        font-size: 15px;
-        cursor: pointer;
-        transition: var(--transition);
-    }
-    
-    .chat-input-area button:hover {
-        transform: scale(1.03);
-    }
-    
-    .quick-actions {
-        display: flex;
-        gap: 8px;
-        padding: 12px 24px;
-        flex-wrap: wrap;
-        border-top: 1px solid var(--border);
-    }
-    
-    .quick-actions button {
-        padding: 6px 16px;
-        border: 1px solid var(--border);
-        border-radius: 20px;
-        background: transparent;
-        color: rgba(255, 255, 255, 0.7);
-        font-size: 12px;
-        cursor: pointer;
-        transition: var(--transition);
-    }
-    
-    .quick-actions button:hover {
-        border-color: var(--secondary);
-        color: white;
-        background: rgba(233, 69, 96, 0.1);
-    }
-    
-    /* ============================================
-       FOOTER
-       ============================================ */
-    .footer {
-        border-top: 1px solid var(--border);
-        padding: 40px 20px;
-        text-align: center;
-        color: rgba(255, 255, 255, 0.4);
-        font-size: 14px;
-    }
-    
-    .footer a {
-        color: rgba(255, 255, 255, 0.6);
-        text-decoration: none;
-        transition: var(--transition);
-    }
-    
-    .footer a:hover {
-        color: var(--text-light);
-    }
-    
-    .footer-links {
-        display: flex;
-        justify-content: center;
-        gap: 24px;
-        margin-bottom: 16px;
-    }
-    
-    /* ============================================
-       RESPONSIVE
-       ============================================ */
-    @media (max-width: 768px) {
-        .nav-links {
-            display: none;
-            flex-direction: column;
-            position: absolute;
-            top: 100%;
-            left: 0;
-            right: 0;
-            background: rgba(15, 12, 41, 0.98);
-            padding: 20px;
-            border-bottom: 1px solid var(--border);
+        .hero-search {
+            display: flex;
+            max-width: 600px;
+            margin: 0 auto;
+            gap: 12px;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 6px;
+            border-radius: 50px;
+            border: 1px solid var(--border);
+            backdrop-filter: blur(10px);
+        }
+        .hero-search input {
+            flex: 1;
+            padding: 16px 24px;
+            border: none;
+            border-radius: 50px;
+            background: transparent;
+            color: white;
+            font-size: 16px;
+            outline: none;
+        }
+        .hero-search input::placeholder { color: rgba(255, 255, 255, 0.4); }
+        .hero-search button {
+            padding: 14px 32px;
+            background: var(--gradient);
+            border: none;
+            border-radius: 50px;
+            color: white;
+            font-weight: 700;
+            font-size: 16px;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+        .hero-search button:hover {
+            transform: scale(1.05);
+            box-shadow: 0 10px 40px rgba(233, 69, 96, 0.3);
+        }
+        .hero-stats {
+            display: flex;
+            gap: 40px;
+            justify-content: center;
+            margin-top: 40px;
+        }
+        .hero-stats-item { text-align: center; }
+        .hero-stats-item .number {
+            font-size: 32px;
+            font-weight: 800;
+            color: var(--text-light);
+        }
+        .hero-stats-item .label {
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.5);
+            margin-top: 4px;
         }
         
-        .nav-links.open {
+        .features {
+            padding: 80px 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .features-header {
+            text-align: center;
+            margin-bottom: 60px;
+        }
+        .features-header h2 {
+            font-size: 40px;
+            font-weight: 700;
+            margin-bottom: 12px;
+        }
+        .features-header p {
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 18px;
+        }
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 24px;
+        }
+        .feature-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 32px;
+            transition: var(--transition);
+            cursor: pointer;
+        }
+        .feature-card:hover {
+            transform: translateY(-8px);
+            border-color: var(--secondary);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+        .feature-icon { font-size: 40px; margin-bottom: 16px; }
+        .feature-card h3 { font-size: 20px; margin-bottom: 8px; }
+        .feature-card p {
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        
+        .pricing-section {
+            padding: 80px 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .pricing-header {
+            text-align: center;
+            margin-bottom: 60px;
+        }
+        .pricing-header h2 {
+            font-size: 40px;
+            font-weight: 700;
+            margin-bottom: 12px;
+        }
+        .pricing-header p {
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 18px;
+        }
+        .pricing-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            align-items: stretch;
+        }
+        .pricing-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 30px 24px;
+            text-align: center;
+            transition: var(--transition);
+            position: relative;
+        }
+        .pricing-card:hover {
+            transform: translateY(-4px);
+            border-color: var(--secondary);
+        }
+        .pricing-card.popular {
+            border-color: var(--secondary);
+            background: rgba(233, 69, 96, 0.1);
+        }
+        .pricing-card.popular::before {
+            content: '🔥 MOST POPULAR';
+            position: absolute;
+            top: -12px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--secondary);
+            color: white;
+            padding: 4px 16px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 700;
+        }
+        .pricing-name {
+            font-size: 14px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: rgba(255, 255, 255, 0.6);
+            margin-bottom: 8px;
+        }
+        .pricing-price {
+            font-size: 36px;
+            font-weight: 800;
+            margin-bottom: 4px;
+        }
+        .pricing-period {
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.4);
+        }
+        .pricing-features {
+            list-style: none;
+            margin: 20px 0;
+            text-align: left;
+        }
+        .pricing-features li {
+            padding: 6px 0;
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.7);
+        }
+        .pricing-features li::before { content: '✅ '; }
+        .pricing-btn {
+            width: 100%;
+            padding: 12px;
+            background: var(--gradient);
+            border: none;
+            border-radius: 25px;
+            color: white;
+            font-weight: 700;
+            font-size: 14px;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+        .pricing-btn:hover {
+            transform: scale(1.02);
+            box-shadow: 0 10px 40px rgba(233, 69, 96, 0.3);
+        }
+        
+        .chat-section {
+            padding: 80px 20px;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        .chat-container {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            overflow: hidden;
+            backdrop-filter: blur(10px);
+        }
+        .chat-header {
+            padding: 20px 24px;
+            background: rgba(255, 255, 255, 0.03);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .chat-header h3 { font-size: 18px; }
+        .chat-status {
+            font-size: 12px;
+            color: #4ade80;
+        }
+        .chat-messages {
+            height: 500px;
+            overflow-y: auto;
+            padding: 24px;
+            background: rgba(0, 0, 0, 0.2);
+        }
+        .message {
+            margin-bottom: 16px;
             display: flex;
         }
-        
-        .mobile-toggle {
-            display: block;
-        }
-        
-        .hero h1 {
-            font-size: 36px;
-        }
-        
-        .hero p {
-            font-size: 16px;
-        }
-        
-        .hero-search {
-            flex-direction: column;
-            border-radius: 16px;
-            background: transparent;
-            padding: 0;
-        }
-        
-        .hero-search input {
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid var(--border);
-            border-radius: 16px;
-        }
-        
-        .hero-search button {
-            border-radius: 16px;
-        }
-        
-        .hero-stats {
-            flex-wrap: wrap;
-            gap: 20px;
-        }
-        
-        .pricing-grid {
-            grid-template-columns: 1fr 1fr;
-        }
-        
-        .features-grid {
-            grid-template-columns: 1fr;
-        }
-        
-        .chat-messages {
-            height: 350px;
-            padding: 16px;
-        }
-        
+        .message.user { justify-content: flex-end; }
+        .message.bot { justify-content: flex-start; }
         .message-bubble {
-            max-width: 90%;
+            max-width: 80%;
+            padding: 12px 20px;
+            border-radius: 20px;
+            word-wrap: break-word;
+            font-size: 15px;
+            line-height: 1.5;
+        }
+        .message.user .message-bubble {
+            background: var(--secondary);
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+        .message.bot .message-bubble {
+            background: rgba(255, 255, 255, 0.08);
+            color: white;
+            border-bottom-left-radius: 4px;
+        }
+        .chat-input-area {
+            display: flex;
+            padding: 16px 24px;
+            gap: 12px;
+            border-top: 1px solid var(--border);
+            background: rgba(0, 0, 0, 0.2);
+        }
+        .chat-input-area input {
+            flex: 1;
+            padding: 14px 20px;
+            border: 1px solid var(--border);
+            border-radius: 25px;
+            background: rgba(255, 255, 255, 0.05);
+            color: white;
+            font-size: 15px;
+            outline: none;
+            transition: var(--transition);
+        }
+        .chat-input-area input:focus { border-color: var(--secondary); }
+        .chat-input-area input::placeholder { color: rgba(255, 255, 255, 0.4); }
+        .chat-input-area button {
+            padding: 14px 32px;
+            background: var(--gradient);
+            border: none;
+            border-radius: 25px;
+            color: white;
+            font-weight: 700;
+            font-size: 15px;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+        .chat-input-area button:hover { transform: scale(1.03); }
+        .quick-actions {
+            display: flex;
+            gap: 8px;
+            padding: 12px 24px;
+            flex-wrap: wrap;
+            border-top: 1px solid var(--border);
+        }
+        .quick-actions button {
+            padding: 6px 16px;
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            background: transparent;
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 12px;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+        .quick-actions button:hover {
+            border-color: var(--secondary);
+            color: white;
+            background: rgba(233, 69, 96, 0.1);
+        }
+        
+        .footer {
+            border-top: 1px solid var(--border);
+            padding: 40px 20px;
+            text-align: center;
+            color: rgba(255, 255, 255, 0.4);
             font-size: 14px;
         }
-        
-        .chat-input-area {
-            flex-direction: column;
-            padding: 12px 16px;
+        .footer a {
+            color: rgba(255, 255, 255, 0.6);
+            text-decoration: none;
+            transition: var(--transition);
         }
-    }
-    
-    @media (max-width: 480px) {
-        .pricing-grid {
-            grid-template-columns: 1fr;
-        }
-        
-        .hero h1 {
-            font-size: 28px;
+        .footer a:hover { color: var(--text-light); }
+        .footer-links {
+            display: flex;
+            justify-content: center;
+            gap: 24px;
+            margin-bottom: 16px;
         }
         
-        .features-header h2 {
-            font-size: 28px;
+        @media (max-width: 768px) {
+            .nav-links {
+                display: none;
+                flex-direction: column;
+                position: absolute;
+                top: 100%;
+                left: 0;
+                right: 0;
+                background: rgba(15, 12, 41, 0.98);
+                padding: 20px;
+                border-bottom: 1px solid var(--border);
+            }
+            .nav-links.open { display: flex; }
+            .mobile-toggle { display: block; }
+            .hero h1 { font-size: 36px; }
+            .hero p { font-size: 16px; }
+            .hero-search {
+                flex-direction: column;
+                border-radius: 16px;
+                background: transparent;
+                padding: 0;
+            }
+            .hero-search input {
+                background: rgba(255, 255, 255, 0.05);
+                border: 1px solid var(--border);
+                border-radius: 16px;
+            }
+            .hero-search button { border-radius: 16px; }
+            .hero-stats { flex-wrap: wrap; gap: 20px; }
+            .pricing-grid { grid-template-columns: 1fr 1fr; }
+            .features-grid { grid-template-columns: 1fr; }
+            .chat-messages { height: 350px; padding: 16px; }
+            .message-bubble { max-width: 90%; font-size: 14px; }
+            .chat-input-area { flex-direction: column; padding: 12px 16px; }
         }
-        
-        .pricing-header h2 {
-            font-size: 28px;
+        @media (max-width: 480px) {
+            .pricing-grid { grid-template-columns: 1fr; }
+            .hero h1 { font-size: 28px; }
+            .features-header h2 { font-size: 28px; }
+            .pricing-header h2 { font-size: 28px; }
         }
-    }
     </style>
 </head>
 <body>
-#part 3
-<!-- ============================================
-    NAVIGATION
-    ============================================ -->
+
     <nav class="navbar" id="navbar">
         <div class="nav-container">
-            <a href="/" class="nav-logo">
-                🚀 <span>Problem Solver</span>
-            </a>
+            <a href="/" class="nav-logo">🚀 <span>Problem Solver</span></a>
             <ul class="nav-links" id="navLinks">
                 <li><a href="#features">Features</a></li>
                 <li><a href="#pricing">Pricing</a></li>
@@ -1399,20 +1198,15 @@ HTML_PAGE_1 = """
         </div>
     </nav>
 
-    <!-- ============================================
-    HERO
-    ============================================ -->
     <section class="hero">
         <div class="hero-content">
             <div class="hero-badge">🚀 AI-Powered Business Intelligence</div>
             <h1>Find Anyone,<br>Anywhere.</h1>
             <p>Stop wasting hours searching. Get contacts, companies, social media, and business intelligence in seconds.</p>
-            
             <div class="hero-search">
                 <input type="text" id="heroSearch" placeholder="Try: Find company Tesla or Email of Elon Musk" onkeypress="if(event.key==='Enter') heroSearchAction()">
                 <button onclick="heroSearchAction()">🔍 Search</button>
             </div>
-            
             <div class="hero-stats">
                 <div class="hero-stats-item">
                     <div class="number">10K+</div>
@@ -1430,9 +1224,6 @@ HTML_PAGE_1 = """
         </div>
     </section>
 
-    <!-- ============================================
-    FEATURES
-    ============================================ -->
     <section class="features" id="features">
         <div class="features-header">
             <h2>🔥 What You Can Find</h2>
@@ -1472,9 +1263,6 @@ HTML_PAGE_1 = """
         </div>
     </section>
 
-    <!-- ============================================
-    PRICING
-    ============================================ -->
     <section class="pricing-section" id="pricing">
         <div class="pricing-header">
             <h2>💰 Choose Your Plan</h2>
@@ -1541,9 +1329,6 @@ HTML_PAGE_1 = """
         </div>
     </section>
 
-    <!-- ============================================
-    CHAT
-    ============================================ -->
     <section class="chat-section" id="chat">
         <div class="chat-container">
             <div class="chat-header">
@@ -1578,9 +1363,6 @@ HTML_PAGE_1 = """
         </div>
     </section>
 
-    <!-- ============================================
-    FOOTER
-    ============================================ -->
     <footer class="footer">
         <div class="footer-links">
             <a href="/">Home</a>
@@ -1591,18 +1373,11 @@ HTML_PAGE_1 = """
         <p>© 2026 Problem Solver. All rights reserved.</p>
     </footer>
 
-    <!-- ============================================
-    JAVASCRIPT
-    ============================================ -->
     <script>
-        // ============================================
-        // NAVIGATION
-        // ============================================
         function toggleNav() {
             document.getElementById('navLinks').classList.toggle('open');
         }
         
-        // Navbar scroll effect
         window.addEventListener('scroll', function() {
             if (window.scrollY > 50) {
                 document.getElementById('navbar').classList.add('scrolled');
@@ -1611,15 +1386,17 @@ HTML_PAGE_1 = """
             }
         });
         
-        // ============================================
-        // CHAT
-        // ============================================
+        function quickSearch(query) {
+            document.getElementById('chatInput').value = query;
+            sendChat();
+            document.getElementById('chat').scrollIntoView({ behavior: 'smooth' });
+        }
+        
         let chatSessionId = Math.random().toString(36);
         
         function quickAction(msg) {
             document.getElementById('chatInput').value = msg;
             sendChat();
-            // Scroll to chat
             document.getElementById('chat').scrollIntoView({ behavior: 'smooth' });
         }
         
@@ -1637,7 +1414,6 @@ HTML_PAGE_1 = """
             
             const messagesDiv = document.getElementById('chatMessages');
             
-            // Add user message
             messagesDiv.innerHTML += `
                 <div class="message user">
                     <div class="message-bubble">${escapeHtml(message)}</div>
@@ -1646,7 +1422,6 @@ HTML_PAGE_1 = """
             input.value = '';
             messagesDiv.scrollTop = messagesDiv.scrollHeight;
             
-            // Add typing indicator
             messagesDiv.innerHTML += `
                 <div class="message bot" id="typingIndicator">
                     <div class="message-bubble">⏳ Thinking...</div>
@@ -1666,21 +1441,15 @@ HTML_PAGE_1 = """
                 
                 const data = await response.json();
                 
-                // Remove typing indicator
                 const typing = document.getElementById('typingIndicator');
                 if (typing) typing.remove();
                 
-                // Add bot response
                 messagesDiv.innerHTML += `
                     <div class="message bot">
                         <div class="message-bubble">${escapeHtml(data.response)}</div>
                     </div>
                 `;
                 messagesDiv.scrollTop = messagesDiv.scrollHeight;
-                
-                if (data.remaining !== undefined) {
-                    // Update status if needed
-                }
             } catch (error) {
                 const typing = document.getElementById('typingIndicator');
                 if (typing) typing.remove();
@@ -1694,9 +1463,6 @@ HTML_PAGE_1 = """
             }
         }
         
-        // ============================================
-        // CHECKOUT
-        // ============================================
         async function checkout(tier) {
             try {
                 const response = await fetch('/create-checkout-session', {
@@ -1705,7 +1471,11 @@ HTML_PAGE_1 = """
                     body: JSON.stringify({ tier: tier })
                 });
                 const data = await response.json();
-                window.location.href = data.checkout_url;
+                if (data.checkout_url) {
+                    window.location.href = data.checkout_url;
+                } else {
+                    alert('Payment error: ' + (data.error || 'Unknown error'));
+                }
             } catch (error) {
                 alert('Payment error: ' + error.message);
             }
@@ -1715,16 +1485,18 @@ HTML_PAGE_1 = """
             try {
                 const response = await fetch('/create-hourly-session', { method: 'POST' });
                 const data = await response.json();
-                window.location.href = data.checkout_url;
+                if (data.checkout_url) {
+                    window.location.href = data.checkout_url;
+                } else {
+                    alert('Payment error: ' + (data.error || 'Unknown error'));
+                }
             } catch (error) {
                 alert('Payment error: ' + error.message);
             }
         }
         
-        // ============================================
-        // UTILITY
-        // ============================================
         function escapeHtml(text) {
+            if (!text) return '';
             return text.replace(/[&<>]/g, function(m) {
                 if (m === '&') return '&amp;';
                 if (m === '<') return '&lt;';
@@ -1733,7 +1505,6 @@ HTML_PAGE_1 = """
             });
         }
         
-        // Enter key for hero search
         document.getElementById('heroSearch').addEventListener('keypress', function(e) {
             if (e.key === 'Enter') heroSearchAction();
         });
@@ -1743,14 +1514,14 @@ HTML_PAGE_1 = """
 </body>
 </html>
 """
-#part 4
+
 # ============================================
-# API ENDPOINTS - Add AFTER HTML_PAGE
+# API ENDPOINTS
 # ============================================
 
 @app.get("/")
 async def root():
-    return HTMLResponse(HTML_PAGE_1 + HTML_PAGE_2 + HTML_PAGE_3)
+    return HTMLResponse(HTML_PAGE)
 
 @app.post("/api/chat")
 async def chat_endpoint(request: Request):
@@ -1758,9 +1529,9 @@ async def chat_endpoint(request: Request):
     message = data.get("message", "")
     session_id = data.get("session_id", "")
     
-    # Founder Mode (HIDDEN - no one knows about it)
+    # Founder Mode (HIDDEN)
     if message.lower().strip() == FOUNDER_NAME.lower():
-        return {"response": "🔓 **FOUNDER MODE ACTIVATED!** Unlimited free access forever."}
+        return {"response": "🔓 **FOUNDER MODE ACTIVATED!** Unlimited free access forever. You now have full access to all features."}
     
     # Check if it's a specific command
     msg_lower = message.lower()
@@ -1768,6 +1539,8 @@ async def chat_endpoint(request: Request):
     # Find Company
     if "find company" in msg_lower or "company info" in msg_lower or "about company" in msg_lower:
         company_name = message.replace("find company", "").replace("company info", "").replace("about company", "").strip()
+        if not company_name:
+            return {"response": "Please specify a company name. Example: 'Find company Tesla'"}
         result = await scraper.find_company(company_name)
         return {"response": format_company_result(result)}
     
@@ -1780,6 +1553,8 @@ async def chat_endpoint(request: Request):
             if len(parts) >= 2:
                 name = parts[0].strip()
                 company = parts[1].strip()
+        if not name:
+            return {"response": "Please specify a name. Example: 'Email of Elon Musk'"}
         result = await scraper.find_person(name, company)
         return {"response": format_contact_result(result)}
     
@@ -1884,7 +1659,7 @@ def format_company_result(result):
     return response
 
 def format_contact_result(result):
-    response = f"**👤 Contact: {result.get('full_name')}**\n\n"
+    response = f"**👤 Contact: {result.get('name')}**\n\n"
     if result.get('title'): response += f"📋 Title: {result['title']}\n"
     if result.get('company'): response += f"🏢 Company: {result['company']}\n"
     if result.get('email'): response += f"📧 Email: {result['email']} {'✅ Verified' if result.get('email_verified') else '⚠️ Unverified'}\n"
@@ -1902,10 +1677,9 @@ def format_contact_result(result):
 @app.post("/create-checkout-session")
 async def create_checkout_session(request: Request):
     if not STRIPE_SECRET_KEY:
-        return {"checkout_url": "#", "error": "Stripe not configured"}
+        return {"checkout_url": None, "error": "Stripe not configured"}
     
     try:
-        import stripe
         stripe.api_key = STRIPE_SECRET_KEY
         
         data = await request.json()
@@ -1925,22 +1699,21 @@ async def create_checkout_session(request: Request):
                 "quantity": 1,
             }],
             mode="subscription",
-            success_url="https://problemslover-sjsg.onrender.com/success",
-            cancel_url="https://problemslover-sjsg.onrender.com/",
+            success_url="https://YOUR_DOMAIN.com/success",
+            cancel_url="https://YOUR_DOMAIN.com/",
             metadata={"tier": tier}
         )
         return {"checkout_url": session.url}
     except Exception as e:
         print(f"Stripe error: {e}")
-        return {"checkout_url": "#", "error": str(e)}
+        return {"checkout_url": None, "error": str(e)}
 
 @app.post("/create-hourly-session")
 async def create_hourly_session():
     if not STRIPE_SECRET_KEY:
-        return {"checkout_url": "#", "error": "Stripe not configured"}
+        return {"checkout_url": None, "error": "Stripe not configured"}
     
     try:
-        import stripe
         stripe.api_key = STRIPE_SECRET_KEY
         
         session = stripe.checkout.Session.create(
@@ -1954,13 +1727,46 @@ async def create_hourly_session():
                 "quantity": 1,
             }],
             mode="payment",
-            success_url="https://problemslover-sjsg.onrender.com/success",
-            cancel_url="https://problemslover-sjsg.onrender.com/",
+            success_url="https://YOUR_DOMAIN.com/success",
+            cancel_url="https://YOUR_DOMAIN.com/",
         )
         return {"checkout_url": session.url}
     except Exception as e:
         print(f"Stripe error: {e}")
-        return {"checkout_url": "#", "error": str(e)}
+        return {"checkout_url": None, "error": str(e)}
+
+@app.get("/success")
+async def success_page():
+    return HTMLResponse("""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Payment Successful</title>
+        <style>
+            body { 
+                font-family: Arial; 
+                display: flex; 
+                justify-content: center; 
+                align-items: center; 
+                height: 100vh; 
+                background: linear-gradient(135deg, #0f0c29, #302b63);
+                color: white;
+                text-align: center;
+            }
+            .box { padding: 40px; background: rgba(255,255,255,0.05); border-radius: 20px; }
+            h1 { font-size: 48px; color: #4ade80; }
+            a { color: #e94560; text-decoration: none; }
+        </style>
+    </head>
+    <body>
+        <div class="box">
+            <h1>✅ Payment Successful!</h1>
+            <p>You now have full access to all features.</p>
+            <a href="/">Return to Home</a>
+        </div>
+    </body>
+    </html>
+    """)
 
 # ============================================
 # HEALTH CHECK
@@ -2005,6 +1811,7 @@ if __name__ == "__main__":
     ║     Server: http://localhost:8000                               ║
     ║                                                                   ║
     ║     ⚠️  Founder word is HIDDEN. No one sees it.                 ║
+    ║     ⚠️  Set your founder word with FOUNDER_NAME env var        ║
     ╚══════════════════════════════════════════════════════════════════╝
     """)
     uvicorn.run(app, host="0.0.0.0", port=8000)
