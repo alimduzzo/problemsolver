@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🔍 Problem Solver - B2B Intelligence</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;background:#0f0c29;color:#fff;min-height:100vh;}
+::-webkit-scrollbar{width:8px;}
+::-webkit-scrollbar-track{background:#0f0c29;}
+::-webkit-scrollbar-thumb{background:#e94560;border-radius:4px;}
+
+.navbar{position:fixed;top:0;left:0;right:0;z-index:1000;background:rgba(15,12,41,0.95);backdrop-filter:blur(20px);border-bottom:1px solid rgba(255,255,255,0.05);padding:14px 0;}
+.nav-container{max-width:1200px;margin:0 auto;padding:0 24px;display:flex;justify-content:space-between;align-items:center;}
+.nav-logo{font-size:22px;font-weight:800;color:#fff;text-decoration:none;}
+.nav-logo span{background:linear-gradient(135deg,#667eea,#e94560);-webkit-background-clip:text;-webkit-text-fill-color:transparent;}
+.nav-links{display:flex;gap:30px;list-style:none;align-items:center;}
+.nav-links a{color:rgba(255,255,255,0.7);text-decoration:none;font-size:14px;font-weight:500;transition:0.3s;}
+.nav-links a:hover{color:#fff;}
+.nav-cta{background:#e94560;padding:8px 22px;border-radius:25px;color:#fff!important;font-weight:600;}
+.nav-cta:hover{background:#ff6b8a;transform:scale(1.05);}
+.mobile-toggle{display:none;background:none;border:none;color:#fff;font-size:28px;cursor:pointer;}
+
+.hero{min-height:100vh;display:flex;align-items:center;justify-content:center;text-align:center;padding:120px 20px 80px;position:relative;overflow:hidden;}
+.hero::before{content:'';position:absolute;top:-50%;left:-50%;width:200%;height:200%;background:radial-gradient(ellipse at center,rgba(233,69,96,0.08) 0%,transparent 70%);animation:pulse 8s ease-in-out infinite;}
+@keyframes pulse{0%,100%{transform:scale(1);opacity:0.5;}50%{transform:scale(1.1);opacity:1;}}
+.hero-content{position:relative;z-index:1;max-width:900px;}
+.hero-badge{display:inline-block;background:rgba(233,69,96,0.15);color:#e94560;padding:6px 20px;border-radius:25px;font-size:13px;font-weight:600;border:1px solid rgba(233,69,96,0.3);margin-bottom:20px;}
+.hero h1{font-size:64px;font-weight:800;line-height:1.1;margin-bottom:20px;background:linear-gradient(135deg,#667eea,#e94560);-webkit-background-clip:text;-webkit-text-fill-color:transparent;}
+.hero p{font-size:20px;color:rgba(255,255,255,0.7);max-width:600px;margin:0 auto 30px;line-height:1.6;}
+.hero-search{display:flex;max-width:600px;margin:0 auto;gap:12px;background:rgba(255,255,255,0.05);padding:6px;border-radius:50px;border:1px solid rgba(255,255,255,0.1);}
+.hero-search input{flex:1;padding:16px 24px;border:none;border-radius:50px;background:transparent;color:#fff;font-size:16px;outline:none;}
+.hero-search input::placeholder{color:rgba(255,255,255,0.4);}
+.hero-search button{padding:14px 32px;background:linear-gradient(135deg,#667eea,#e94560);border:none;border-radius:50px;color:#fff;font-weight:700;font-size:16px;cursor:pointer;transition:0.3s;}
+.hero-search button:hover{transform:scale(1.05);box-shadow:0 10px 40px rgba(233,69,96,0.3);}
+.hero-stats{display:flex;gap:40px;justify-content:center;margin-top:40px;flex-wrap:wrap;}
+.hero-stats-item{text-align:center;}
+.hero-stats-item .number{font-size:32px;font-weight:800;}
+.hero-stats-item .label{font-size:14px;color:rgba(255,255,255,0.5);}
+
+.features{padding:80px 20px;max-width:1200px;margin:0 auto;}
+.features-header{text-align:center;margin-bottom:60px;}
+.features-header h2{font-size:40px;font-weight:700;}
+.features-header p{color:rgba(255,255,255,0.6);font-size:18px;}
+.features-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px;}
+.feature-card{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:32px;transition:0.3s;cursor:pointer;}
+.feature-card:hover{transform:translateY(-8px);border-color:#e94560;box-shadow:0 20px 60px rgba(0,0,0,0.3);}
+.feature-icon{font-size:40px;margin-bottom:16px;}
+.feature-card h3{font-size:20px;margin-bottom:8px;}
+.feature-card p{color:rgba(255,255,255,0.6);font-size:14px;line-height:1.6;}
+
+.pricing-section{padding:80px 20px;max-width:1200px;margin:0 auto;}
+.pricing-header{text-align:center;margin-bottom:60px;}
+.pricing-header h2{font-size:40px;font-weight:700;}
+.pricing-header p{color:rgba(255,255,255,0.6);font-size:18px;}
+.pricing-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:20px;}
+.pricing-card{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:30px 24px;text-align:center;transition:0.3s;position:relative;}
+.pricing-card:hover{transform:translateY(-4px);border-color:#e94560;}
+.pricing-card.popular{border-color:#e94560;background:rgba(233,69,96,0.08);}
+.pricing-card.popular::before{content:'🔥 MOST POPULAR';position:absolute;top:-12px;left:50%;transform:translateX(-50%);background:#e94560;color:#fff;padding:4px 16px;border-radius:20px;font-size:11px;font-weight:700;}
+.pricing-name{font-size:14px;font-weight:600;text-transform:uppercase;letter-spacing:1px;color:rgba(255,255,255,0.6);margin-bottom:8px;}
+.pricing-price{font-size:36px;font-weight:800;}
+.pricing-period{font-size:14px;color:rgba(255,255,255,0.4);}
+.pricing-features{list-style:none;margin:20px 0;text-align:left;}
+.pricing-features li{padding:6px 0;font-size:14px;color:rgba(255,255,255,0.7);}
+.pricing-features li::before{content:'✅ ';}
+.pricing-btn{width:100%;padding:12px;background:linear-gradient(135deg,#667eea,#e94560);border:none;border-radius:25px;color:#fff;font-weight:700;font-size:14px;cursor:pointer;transition:0.3s;}
+.pricing-btn:hover{transform:scale(1.02);box-shadow:0 10px 40px rgba(233,69,96,0.3);}
+
+.chat-section{padding:80px 20px;max-width:900px;margin:0 auto;}
+.chat-container{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:16px;overflow:hidden;}
+.chat-header{padding:20px 24px;border-bottom:1px solid rgba(255,255,255,0.08);display:flex;justify-content:space-between;align-items:center;}
+.chat-header h3{font-size:18px;}
+.chat-status{font-size:12px;color:#4ade80;}
+.chat-messages{height:450px;overflow-y:auto;padding:24px;background:rgba(0,0,0,0.2);}
+.message{margin-bottom:16px;display:flex;}
+.message.user{justify-content:flex-end;}
+.message.bot{justify-content:flex-start;}
+.message-bubble{max-width:80%;padding:12px 20px;border-radius:20px;word-wrap:break-word;font-size:15px;line-height:1.5;}
+.message.user .message-bubble{background:#e94560;color:#fff;border-bottom-right-radius:4px;}
+.message.bot .message-bubble{background:rgba(255,255,255,0.08);color:#fff;border-bottom-left-radius:4px;}
+.chat-input-area{display:flex;padding:16px 24px;gap:12px;border-top:1px solid rgba(255,255,255,0.08);}
+.chat-input-area input{flex:1;padding:14px 20px;border:1px solid rgba(255,255,255,0.1);border-radius:25px;background:rgba(255,255,255,0.05);color:#fff;font-size:15px;outline:none;transition:0.3s;}
+.chat-input-area input:focus{border-color:#e94560;}
+.chat-input-area input::placeholder{color:rgba(255,255,255,0.4);}
+.chat-input-area button{padding:14px 32px;background:linear-gradient(135deg,#667eea,#e94560);border:none;border-radius:25px;color:#fff;font-weight:700;font-size:15px;cursor:pointer;transition:0.3s;}
+.chat-input-area button:hover{transform:scale(1.03);}
+.quick-actions{display:flex;gap:8px;padding:12px 24px;flex-wrap:wrap;border-top:1px solid rgba(255,255,255,0.05);}
+.quick-actions button{padding:6px 16px;border:1px solid rgba(255,255,255,0.1);border-radius:20px;background:transparent;color:rgba(255,255,255,0.7);font-size:12px;cursor:pointer;transition:0.3s;}
+.quick-actions button:hover{border-color:#e94560;color:#fff;background:rgba(233,69,96,0.1);}
+
+.footer{border-top:1px solid rgba(255,255,255,0.05);padding:40px 20px;text-align:center;color:rgba(255,255,255,0.4);font-size:14px;}
+.footer-links{display:flex;justify-content:center;gap:24px;margin-bottom:16px;}
+.footer-links a{color:rgba(255,255,255,0.6);text-decoration:none;transition:0.3s;}
+.footer-links a:hover{color:#fff;}
+
+@media(max-width:768px){
+.nav-links{display:none;flex-direction:column;position:absolute;top:100%;left:0;right:0;background:rgba(15,12,41,0.98);padding:20px;border-bottom:1px solid rgba(255,255,255,0.05);}
+.nav-links.open{display:flex;}
+.mobile-toggle{display:block;}
+.hero h1{font-size:36px;}
+.hero p{font-size:16px;}
+.hero-search{flex-direction:column;border-radius:16px;background:transparent;padding:0;}
+.hero-search input{background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:16px;}
+.hero-search button{border-radius:16px;}
+.pricing-grid{grid-template-columns:1fr 1fr;}
+.features-grid{grid-template-columns:1fr;}
+.chat-messages{height:350px;padding:16px;}
+.message-bubble{max-width:90%;font-size:14px;}
+.chat-input-area{flex-direction:column;padding:12px 16px;}
+}
+@media(max-width:480px){
+.pricing-grid{grid-template-columns:1fr;}
+.hero h1{font-size:28px;}
+.features-header h2,.pricing-header h2{font-size:28px;}
+}
+</style>
+</head>
+<body>
+
+<nav class="navbar" id="navbar">
+<div class="nav-container">
+<a href="/" class="nav-logo">🚀 <span>Problem Solver</span></a>
+<ul class="nav-links" id="navLinks">
+<li><a href="#features">Features</a></li>
+<li><a href="#pricing">Pricing</a></li>
+<li><a href="#chat">Chat</a></li>
+<li><a href="#pricing" class="nav-cta">Get Started</a></li>
+</ul>
+<button class="mobile-toggle" onclick="toggleNav()">☰</button>
+</div>
+</nav>
+
+<section class="hero">
+<div class="hero-content">
+<div class="hero-badge">🚀 AI-Powered Business Intelligence</div>
+<h1>Find Anyone,<br>Anywhere.</h1>
+<p>Stop wasting hours. Get contacts, companies, social media, and business intelligence in seconds.</p>
+<div class="hero-search">
+<input type="text" id="heroSearch" placeholder="Try: Find company Tesla" onkeypress="if(event.key==='Enter')heroSearchAction()">
+<button onclick="heroSearchAction()">🔍 Search</button>
+</div>
+<div class="hero-stats">
+<div class="hero-stats-item"><div class="number">10K+</div><div class="label">Companies</div></div>
+<div class="hero-stats-item"><div class="number">50K+</div><div class="label">Contacts</div></div>
+<div class="hero-stats-item"><div class="number">100+</div><div class="label">Countries</div></div>
+</div>
+</div>
+</section>
+
+<section class="features" id="features">
+<div class="features-header"><h2>🔥 What You Can Find</h2><p>Everything you need to grow your business</p></div>
+<div class="features-grid">
+<div class="feature-card" onclick="quickAction('Find company')"><div class="feature-icon">🏢</div><h3>Companies</h3><p>Full company data: website, email, phone, LinkedIn, Twitter, technologies</p></div>
+<div class="feature-card" onclick="quickAction('Email of')"><div class="feature-icon">📧</div><h3>Contacts & Emails</h3><p>Find anyone's email, phone, LinkedIn profile. Verified and up-to-date.</p></div>
+<div class="feature-card" onclick="quickAction('Find TikTok for')"><div class="feature-icon">🎵</div><h3>Social Media</h3><p>Discover TikTok, Instagram, Twitter, LinkedIn, YouTube profiles</p></div>
+<div class="feature-card" onclick="quickAction('Find news about')"><div class="feature-icon">📰</div><h3>News & Updates</h3><p>Latest news, funding rounds, hiring signals, and announcements</p></div>
+<div class="feature-card" onclick="quickAction('Find location of')"><div class="feature-icon">📍</div><h3>Location & Identity</h3><p>Find where people are, nationality, and public records</p></div>
+<div class="feature-card" onclick="quickAction('How to')"><div class="feature-icon">💡</div><h3>AI Problem Solver</h3><p>Get actionable business advice, strategies, and solutions</p></div>
+</div>
+</section>
+
+<section class="pricing-section" id="pricing">
+<div class="pricing-header"><h2>💰 Choose Your Plan</h2><p>Start free, upgrade when you need more</p></div>
+<div class="pricing-grid">
+<div class="pricing-card"><div class="pricing-name">Free</div><div class="pricing-price">$0</div><div class="pricing-period">forever</div><ul class="pricing-features"><li>2 tasks</li><li>Basic search</li><li>Test the tool</li></ul><button class="pricing-btn" onclick="alert('Free tier: 2 tasks')">Start Free</button></div>
+<div class="pricing-card"><div class="pricing-name">Basic</div><div class="pricing-price">$29</div><div class="pricing-period">/month</div><ul class="pricing-features"><li>500 lookups</li><li>AI Chat</li><li>Company data</li></ul><button class="pricing-btn" onclick="checkout('basic')">Subscribe</button></div>
+<div class="pricing-card popular"><div class="pricing-name">Medium</div><div class="pricing-price">$99</div><div class="pricing-period">/month</div><ul class="pricing-features"><li>2000 lookups</li><li>AI Chat</li><li>Social Media Finder</li><li>Location Finder</li></ul><button class="pricing-btn" onclick="checkout('medium')">Subscribe</button></div>
+<div class="pricing-card"><div class="pricing-name">High</div><div class="pricing-price">$299</div><div class="pricing-period">/month</div><ul class="pricing-features"><li>Unlimited</li><li>AI Chat</li><li>All features</li><li>Priority support</li></ul><button class="pricing-btn" onclick="checkout('high')">Subscribe</button></div>
+<div class="pricing-card"><div class="pricing-name">Hourly</div><div class="pricing-price">$10</div><div class="pricing-period">1 hour</div><ul class="pricing-features"><li>Unlimited chat</li><li>Full access</li><li>No commitment</li></ul><button class="pricing-btn" onclick="hourlyCheckout()">Buy Hour</button></div>
+</div>
+</section>
+
+<section class="chat-section" id="chat">
+<div class="chat-container">
+<div class="chat-header"><h3>💬 AI Assistant</h3><span class="chat-status">● Online</span></div>
+<div class="chat-messages" id="chatMessages">
+<div class="message bot"><div class="message-bubble">👋 Hello! I'm your AI assistant.<br><br>I can find:<br>• 🏢 Companies & business data<br>• 📧 Contacts, emails & phones<br>• 📱 TikTok, Instagram, Twitter<br>• 📰 News & hiring signals<br>• 💡 Solutions to problems<br><br><strong>Type your secret word</strong> for unlimited free access!</div></div>
+</div>
+<div class="quick-actions">
+<button onclick="quickAction('Find company Tesla')">🚗 Tesla</button>
+<button onclick="quickAction('Email of Elon Musk')">📧 Elon Musk</button>
+<button onclick="quickAction('Find TikTok for Tesla')">🎵 TikTok</button>
+<button onclick="quickAction('Find Instagram for Apple')">📸 Instagram</button>
+<button onclick="quickAction('How to grow my business')">📈 Growth</button>
+</div>
+<div class="chat-input-area">
+<input type="text" id="chatInput" placeholder="Type your question..." onkeypress="if(event.key==='Enter')sendChat()">
+<button onclick="sendChat()">Send</button>
+</div>
+</div>
+</section>
+
+<footer class="footer">
+<div class="footer-links"><a href="/">Home</a><a href="#features">Features</a><a href="#pricing">Pricing</a><a href="#chat">Chat</a></div>
+<p>© 2026 Problem Solver. All rights reserved.</p>
+</footer>
+
+<script>
+function toggleNav(){document.getElementById('navLinks').classList.toggle('open');}
+
+function quickAction(msg){document.getElementById('chatInput').value=msg;sendChat();document.getElementById('chat').scrollIntoView({behavior:'smooth'});}
+
+function heroSearchAction(){const q=document.getElementById('heroSearch').value;if(q.trim())quickAction(q);}
+
+async function sendChat(){
+const input=document.getElementById('chatInput');
+const msg=input.value.trim();
+if(!msg)return;
+const m=document.getElementById('chatMessages');
+m.innerHTML+=`<div class="message user"><div class="message-bubble">${escapeHtml(msg)}</div></div>`;
+input.value='';
+m.scrollTop=m.scrollHeight;
+m.innerHTML+=`<div class="message bot" id="typing"><div class="message-bubble">⏳ Thinking...</div></div>`;
+m.scrollTop=m.scrollHeight;
+try{
+const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:msg})});
+const d=await r.json();
+document.getElementById('typing').remove();
+m.innerHTML+=`<div class="message bot"><div class="message-bubble">${escapeHtml(d.response)}</div></div>`;
+m.scrollTop=m.scrollHeight;
+}catch(e){
+document.getElementById('typing').remove();
+m.innerHTML+=`<div class="message bot"><div class="message-bubble">Error</div></div>`;
+}
+}
+
+async function checkout(tier){
+try{
+const r=await fetch('/create-checkout-session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tier:tier})});
+const d=await r.json();
+if(d.checkout_url)window.location.href=d.checkout_url;
+}catch(e){alert('Payment error');}
+}
+
+async function hourlyCheckout(){
+try{
+const r=await fetch('/create-hourly-session',{method:'POST'});
+const d=await r.json();
+if(d.checkout_url)window.location.href=d.checkout_url;
+}catch(e){alert('Payment error');}
+}
+
+function escapeHtml(t){return t.replace(/[&<>]/g,function(m){if(m==='&')return'&amp;';if(m==='<')return'&lt;';if(m==='>')return'&gt;';return m;});}
+</script>
+</body>
+</html>
